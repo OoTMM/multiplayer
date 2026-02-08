@@ -1,4 +1,4 @@
-module github.com/OoTMM/multiplayer
+module github.com/OoTMM/multiplayer/client
 
 go 1.25.7
 

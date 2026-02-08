@@ -3,16 +3,14 @@ package main
 import (
 	"fmt"
 	"net"
-
-	"github.com/OoTMM/multiplayer/internal/client"
 )
 
 func main() {
-	config := client.ParseConfig()
+	config := ParseConfig()
 	startClient(config)
 }
 
-func startClient(config *client.Config) {
+func startClient(config *Config) {
 	socket, err := net.Listen("tcp", fmt.Sprintf(":%d", config.BindPort))
 	if err != nil {
 		fmt.Printf("Failed to bind to port: %v\n", err)
