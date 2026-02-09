@@ -7,17 +7,14 @@ import (
 
 func main() {
 	config := ParseConfig()
-	startClient(config)
-}
-
-func startClient(config *Config) {
-	socket, err := net.Listen("tcp", fmt.Sprintf(":%d", config.BindPort))
+	bind := fmt.Sprintf("%s:%d", config.BindAddress, config.BindPort)
+	socket, err := net.Listen("tcp", bind)
 	if err != nil {
 		fmt.Printf("Failed to bind to port: %v\n", err)
 		return
 	}
 	defer socket.Close()
-	fmt.Println("OoTMM Multiplayer Client Started")
+	fmt.Printf("OoTMM Multiplayer Client Started on %s\n", bind)
 	for {
 		conn, err := socket.Accept()
 		if err != nil {
@@ -25,10 +22,14 @@ func startClient(config *Config) {
 			continue
 		}
 
-		tcpConn := conn.(*net.TCPConn)
-		tcpConn.SetNoDelay(true)
-
-		fmt.Printf("Accepted connection from %s\n", conn.RemoteAddr().String())
-		tcpConn.Close()
+		go handleClient(conn)
 	}
+}
+
+type SessionInfo struct {
+	UUID [16]byte
+}
+
+type Session struct {
+	Info SessionInfo
 }
