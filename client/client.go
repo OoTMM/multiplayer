@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"time"
 )
 
 type Client struct {
@@ -41,9 +40,46 @@ func NewClient(conn net.Conn) *Client {
 	}
 }
 
+func clientSendRaw(client *Client, data []byte) error {
+	header := make([]byte, 2)
+	binary.BigEndian.PutUint16(header[0:2], uint16(len(data)))
+	_, err := client.Conn.Write(header)
+	if err != nil {
+		return fmt.Errorf("Failed to write packet header: %v", err)
+	}
+	if len(data) > 0 {
+		_, err = client.Conn.Write(data)
+		if err != nil {
+			return fmt.Errorf("Failed to write packet data: %v", err)
+		}
+	}
+	return nil
+}
+
+func clientRecvRaw(client *Client) ([]byte, error) {
+	header := make([]byte, 2)
+	_, err := io.ReadFull(client.Conn, header)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read packet header: %v", err)
+	}
+	length := binary.BigEndian.Uint16(header[0:2])
+	if length > 512 {
+		return nil, fmt.Errorf("Invalid packet length: %d", length)
+	}
+	data := make([]byte, length)
+	if length > 0 {
+		_, err = io.ReadFull(client.Conn, data)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to read packet data: %v", err)
+		}
+	}
+	return data, nil
+}
+
 func clientSendPacket(client *Client, payload []byte) error {
 	length := uint16(len(payload))
-	if length > 512 {
+	lengthTotal := length + 8
+	if lengthTotal > 512 {
 		return fmt.Errorf("Payload too large: %d bytes", length)
 	}
 	header := make([]byte, 10)
@@ -64,60 +100,44 @@ func clientSendPacket(client *Client, payload []byte) error {
 	return nil
 }
 
-func clientReadPacket(client *Client) ([]byte, error) {
-	header := make([]byte, 10)
-	_, err := io.ReadFull(client.Conn, header[0:1])
+func clientRecvPacket(client *Client) ([]byte, error) {
+	raw, err := clientRecvRaw(client)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to read packet header: %v", err)
+		return nil, err
 	}
-	client.Conn.SetReadDeadline(time.Now().Add(1 * time.Second))
-	_, err = io.ReadFull(client.Conn, header[1:10])
-	if err != nil {
-		return nil, fmt.Errorf("Failed to read packet header: %v", err)
+	if len(raw) < 8 {
+		return nil, fmt.Errorf("Packet too short: %d bytes", len(raw))
 	}
-	length := binary.BigEndian.Uint16(header[0:2])
-	if length > 512 {
-		return nil, fmt.Errorf("Invalid packet length: %d", length)
-	}
-	token := binary.BigEndian.Uint32(header[2:6])
-	packetID := binary.BigEndian.Uint32(header[6:10])
+	token := binary.BigEndian.Uint32(raw[0:4])
+	packetID := binary.BigEndian.Uint32(raw[4:8])
 	if token != client.Token {
-		return nil, fmt.Errorf("Invalid token in packet: %08x", token)
+		return nil, fmt.Errorf("Invalid packet token: %08x", token)
 	}
 	if packetID != client.NextPacketID {
 		return nil, fmt.Errorf("Invalid packet ID: expected %d, got %d", client.NextPacketID, packetID)
 	}
-	payload := make([]byte, length)
-	if length > 0 {
-		_, err = io.ReadFull(client.Conn, payload)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to read packet payload: %v", err)
-		}
-	}
-	client.Conn.SetReadDeadline(time.Time{})
 	client.NextPacketID++
-	return payload, nil
+	return raw[8:], nil
 }
 
 func clientHandshake(client *Client) error {
-	magic := make([]byte, 6)
-	_, err := io.ReadFull(client.Conn, magic)
+	/* Handle initial packet */
+	pkt, err := clientRecvRaw(client)
 	if err != nil {
-		return fmt.Errorf("New Client: Failed to read magic: %v", err)
+		return err
 	}
-	if string(magic) != "OoTMM\x00" {
-		return fmt.Errorf("New Client: Invalid magic: %s", string(magic))
+	if string(pkt) != "OoTMM\x00" {
+		return fmt.Errorf("New Client: Invalid magic")
 	}
-	_, err = client.Conn.Write([]byte("OoTMM\x00"))
+
+	/* Respond */
+	resp := make([]byte, 6+8)
+	copy(resp[0:6], []byte("OoTMM\x00"))
+	binary.BigEndian.PutUint32(resp[6:10], client.Token)
+	binary.BigEndian.PutUint32(resp[10:14], client.NextPacketID)
+	err = clientSendRaw(client, resp)
 	if err != nil {
-		return fmt.Errorf("New Client: Failed to respond to magic: %v", err)
-	}
-	info := make([]byte, 8)
-	binary.BigEndian.PutUint32(info[0:4], client.Token)
-	binary.BigEndian.PutUint32(info[4:8], client.NextPacketID)
-	_, err = client.Conn.Write(info)
-	if err != nil {
-		return fmt.Errorf("New Client: Failed to send handshake info: %v", err)
+		return fmt.Errorf("New Client: Failed to respond")
 	}
 	return nil
 }
@@ -150,7 +170,7 @@ func processPacket(client *Client, payload []byte) error {
 
 func clientLoop(client *Client) {
 	for {
-		payload, err := clientReadPacket(client)
+		payload, err := clientRecvPacket(client)
 		if err != nil {
 			fmt.Printf("Error reading packet: %v\n", err)
 			return
@@ -167,8 +187,6 @@ func clientLoop(client *Client) {
 func handleClient(conn net.Conn) {
 	/* Basic setup */
 	defer conn.Close()
-	tcpConn := conn.(*net.TCPConn)
-	tcpConn.SetNoDelay(true)
 
 	/* Create the client */
 	client := NewClient(conn)
