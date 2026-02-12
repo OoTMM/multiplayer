@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -22,7 +23,7 @@ type Client struct {
 	SessionSecret  uint32
 	PlayerUniqueID uint64
 	PlayerID       uint8
-	TeamID         uint8
+	NameData       [8]byte
 }
 
 const OP_WRITE_WAL_ITEM = 0x01
@@ -135,7 +136,7 @@ func (client *Client) Handshake() error {
 	if err != nil {
 		return err
 	}
-	if len(pkt) < 36 {
+	if len(pkt) < 43 {
 		return fmt.Errorf("New Client: Packet too short: %d bytes", len(pkt))
 	}
 	pktMagic := string(pkt[0:6])
@@ -144,11 +145,11 @@ func (client *Client) Handshake() error {
 	}
 
 	/* All good, extract infos */
-	copy(client.SessionID[:], pkt[6:22])
-	client.SessionSecret = binary.BigEndian.Uint32(pkt[22:26])
-	client.PlayerUniqueID = binary.BigEndian.Uint64(pkt[26:34])
-	client.PlayerID = pkt[34]
-	client.TeamID = pkt[35]
+	copy(client.NameData[:], pkt[6:14])
+	copy(client.SessionID[:], pkt[14:30])
+	client.SessionSecret = binary.BigEndian.Uint32(pkt[30:34])
+	client.PlayerUniqueID = binary.BigEndian.Uint64(pkt[34:42])
+	client.PlayerID = pkt[42]
 
 	/* We have an UUID, find the matching session */
 	session := client.app.GetSession(client.SessionID)
@@ -199,11 +200,11 @@ func (client *Client) Start() {
 	}
 
 	fmt.Println("\nClient connected!")
+	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(client.NameData[:], "\x00")))
 	fmt.Printf(" * SessionID:      %x\n", client.SessionID)
 	fmt.Printf(" * SessionSecret:  %08x\n", client.SessionSecret)
 	fmt.Printf(" * PlayerUniqueID: %016x\n", client.PlayerUniqueID)
 	fmt.Printf(" * PlayerID:       %d\n", client.PlayerID)
-	fmt.Printf(" * TeamID:         %d\n", client.TeamID)
 
 	client.Loop()
 	fmt.Println("Terminating client")
