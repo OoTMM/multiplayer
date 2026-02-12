@@ -7,23 +7,30 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 )
 
 type Client struct {
-	Conn         net.Conn
-	Ctx          context.Context
-	Cancel       context.CancelFunc
-	Token        uint32
-	NextPacketID uint32
+	app            *App
+	session        *Session
+	Conn           net.Conn
+	Ctx            context.Context
+	Cancel         context.CancelFunc
+	Token          uint32
+	NextPacketID   uint32
+	SessionID      [16]byte
+	SessionSecret  uint32
+	PlayerUniqueID uint64
+	PlayerID       uint8
+	TeamID         uint8
 }
 
-const OP_ENTRY_SEND = 0x01
-const OP_ENTRY_GET = 0x02
+const OP_WRITE_WAL_ITEM = 0x01
 
-const ENTRY_ITEM = 0x01
-
-func NewClient(conn net.Conn) *Client {
+func NewClient(app *App, conn net.Conn) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
+	/* Set a read timeout of 30 seconds */
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 	/* Create a 32 bits random token for this client */
 	var randBytes [8]byte
@@ -32,6 +39,7 @@ func NewClient(conn net.Conn) *Client {
 	nextPacketID := binary.BigEndian.Uint32(randBytes[4:8])
 
 	return &Client{
+		app:          app,
 		Conn:         conn,
 		Ctx:          ctx,
 		Cancel:       cancel,
@@ -40,7 +48,7 @@ func NewClient(conn net.Conn) *Client {
 	}
 }
 
-func clientSendRaw(client *Client, data []byte) error {
+func (client *Client) SendRaw(data []byte) error {
 	header := make([]byte, 2)
 	binary.BigEndian.PutUint16(header[0:2], uint16(len(data)))
 	_, err := client.Conn.Write(header)
@@ -56,7 +64,8 @@ func clientSendRaw(client *Client, data []byte) error {
 	return nil
 }
 
-func clientRecvRaw(client *Client) ([]byte, error) {
+func (client *Client) RecvRaw() ([]byte, error) {
+	client.Conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	header := make([]byte, 2)
 	_, err := io.ReadFull(client.Conn, header)
 	if err != nil {
@@ -76,14 +85,14 @@ func clientRecvRaw(client *Client) ([]byte, error) {
 	return data, nil
 }
 
-func clientSendPacket(client *Client, payload []byte) error {
+func (client *Client) SendPacket(payload []byte) error {
 	length := uint16(len(payload))
 	lengthTotal := length + 8
 	if lengthTotal > 512 {
 		return fmt.Errorf("Payload too large: %d bytes", length)
 	}
 	header := make([]byte, 10)
-	binary.BigEndian.PutUint16(header[0:2], length)
+	binary.BigEndian.PutUint16(header[0:2], lengthTotal)
 	binary.BigEndian.PutUint32(header[2:6], client.Token)
 	binary.BigEndian.PutUint32(header[6:10], client.NextPacketID)
 	_, err := client.Conn.Write(header)
@@ -100,8 +109,8 @@ func clientSendPacket(client *Client, payload []byte) error {
 	return nil
 }
 
-func clientRecvPacket(client *Client) ([]byte, error) {
-	raw, err := clientRecvRaw(client)
+func (client *Client) RecvPacket() ([]byte, error) {
+	raw, err := client.RecvRaw()
 	if err != nil {
 		return nil, err
 	}
@@ -120,63 +129,57 @@ func clientRecvPacket(client *Client) ([]byte, error) {
 	return raw[8:], nil
 }
 
-func clientHandshake(client *Client) error {
+func (client *Client) Handshake() error {
 	/* Handle initial packet */
-	pkt, err := clientRecvRaw(client)
+	pkt, err := client.RecvRaw()
 	if err != nil {
 		return err
 	}
-	if string(pkt) != "OoTMM\x00" {
+	if len(pkt) < 36 {
+		return fmt.Errorf("New Client: Packet too short: %d bytes", len(pkt))
+	}
+	pktMagic := string(pkt[0:6])
+	if pktMagic != "OoTMM\x00" {
 		return fmt.Errorf("New Client: Invalid magic")
 	}
+
+	/* All good, extract infos */
+	copy(client.SessionID[:], pkt[6:22])
+	client.SessionSecret = binary.BigEndian.Uint32(pkt[22:26])
+	client.PlayerUniqueID = binary.BigEndian.Uint64(pkt[26:34])
+	client.PlayerID = pkt[34]
+	client.TeamID = pkt[35]
+
+	/* We have an UUID, find the matching session */
+	session := client.app.GetSession(client.SessionID)
+	client.session = session
+	session.AddClient(client)
 
 	/* Respond */
 	resp := make([]byte, 6+8)
 	copy(resp[0:6], []byte("OoTMM\x00"))
 	binary.BigEndian.PutUint32(resp[6:10], client.Token)
 	binary.BigEndian.PutUint32(resp[10:14], client.NextPacketID)
-	err = clientSendRaw(client, resp)
+	err = client.SendRaw(resp)
 	if err != nil {
 		return fmt.Errorf("New Client: Failed to respond")
 	}
 	return nil
 }
 
-func clientSendPacketEmpty(client *Client) error {
-	return clientSendPacket(client, []byte{})
+func (client *Client) SendPacketEmpty() error {
+	return client.SendPacket([]byte{})
 }
 
-func processPacketEntrySend(client *Client, payload []byte) error {
-	/* TODO: Implement this */
-	fmt.Printf("debug: Received ENTRY_SEND packet with payload: %x\n", payload[1:])
-	return clientSendPacketEmpty(client)
-}
-
-func processPacketUnknown(client *Client, payload []byte) error {
-	fmt.Printf("warn: Ignoring unknown packet type %d\n", payload[0])
-	return clientSendPacketEmpty(client)
-}
-
-func processPacket(client *Client, payload []byte) error {
-	op := payload[0]
-
-	switch op {
-	case OP_ENTRY_SEND:
-		return processPacketEntrySend(client, payload)
-	default:
-		return processPacketUnknown(client, payload)
-	}
-}
-
-func clientLoop(client *Client) {
+func (client *Client) Loop() {
 	for {
-		payload, err := clientRecvPacket(client)
+		payload, err := client.RecvPacket()
 		if err != nil {
 			fmt.Printf("Error reading packet: %v\n", err)
 			return
 		}
 
-		err = processPacket(client, payload)
+		err = GamePacketHandler(client, payload)
 		if err != nil {
 			fmt.Printf("Error processing packet: %v\n", err)
 			return
@@ -184,20 +187,24 @@ func clientLoop(client *Client) {
 	}
 }
 
-func handleClient(conn net.Conn) {
+func (client *Client) Start() {
 	/* Basic setup */
-	defer conn.Close()
-
-	/* Create the client */
-	client := NewClient(conn)
+	defer client.Conn.Close()
 
 	/* Wait for magic */
-	err := clientHandshake(client)
+	err := client.Handshake()
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		return
 	}
 
-	fmt.Printf("Accepted connection from %s\n", conn.RemoteAddr().String())
-	clientLoop(client)
+	fmt.Println("Client connected!")
+	fmt.Printf(" * SessionID:      %x\n", client.SessionID)
+	fmt.Printf(" * SessionSecret:  %08x\n", client.SessionSecret)
+	fmt.Printf(" * PlayerUniqueID: %016x\n", client.PlayerUniqueID)
+	fmt.Printf(" * PlayerID:       %d\n", client.PlayerID)
+	fmt.Printf(" * TeamID:         %d\n", client.TeamID)
+
+	client.Loop()
+	fmt.Println("Terminating client")
 }
