@@ -198,7 +198,7 @@ func (client *Client) Start() {
 		return
 	}
 
-	fmt.Println("Client connected!")
+	fmt.Println("\nClient connected!")
 	fmt.Printf(" * SessionID:      %x\n", client.SessionID)
 	fmt.Printf(" * SessionSecret:  %08x\n", client.SessionSecret)
 	fmt.Printf(" * PlayerUniqueID: %016x\n", client.PlayerUniqueID)
