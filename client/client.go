@@ -11,14 +11,7 @@ import (
 	"time"
 )
 
-type Client struct {
-	app            *App
-	session        *Session
-	Conn           net.Conn
-	Ctx            context.Context
-	Cancel         context.CancelFunc
-	Token          uint32
-	NextPacketID   uint32
+type ClientInfo struct {
 	SessionID      [16]byte
 	SessionSecret  uint32
 	PlayerUniqueID uint64
@@ -26,7 +19,24 @@ type Client struct {
 	NameData       [8]byte
 }
 
-const OP_WRITE_WAL_ITEM = 0x01
+type ClientPos struct {
+	Key uint16
+	X   float32
+	Y   float32
+	Z   float32
+}
+
+type Client struct {
+	app          *App
+	session      *Session
+	Conn         net.Conn
+	Ctx          context.Context
+	Cancel       context.CancelFunc
+	Token        uint32
+	NextPacketID uint32
+	Info         ClientInfo
+	Pos          ClientPos
+}
 
 func NewClient(app *App, conn net.Conn) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -46,6 +56,9 @@ func NewClient(app *App, conn net.Conn) *Client {
 		Cancel:       cancel,
 		Token:        token,
 		NextPacketID: nextPacketID,
+		Pos: ClientPos{
+			Key: 0xffff,
+		},
 	}
 }
 
@@ -145,14 +158,14 @@ func (client *Client) Handshake() error {
 	}
 
 	/* All good, extract infos */
-	copy(client.NameData[:], pkt[6:14])
-	copy(client.SessionID[:], pkt[14:30])
-	client.SessionSecret = binary.BigEndian.Uint32(pkt[30:34])
-	client.PlayerUniqueID = binary.BigEndian.Uint64(pkt[34:42])
-	client.PlayerID = pkt[42]
+	copy(client.Info.NameData[:], pkt[6:14])
+	copy(client.Info.SessionID[:], pkt[14:30])
+	client.Info.SessionSecret = binary.BigEndian.Uint32(pkt[30:34])
+	client.Info.PlayerUniqueID = binary.BigEndian.Uint64(pkt[34:42])
+	client.Info.PlayerID = pkt[42]
 
 	/* We have an UUID, find the matching session */
-	session := client.app.GetSession(client.SessionID)
+	session := client.app.GetSession(client.Info.SessionID)
 	client.session = session
 	session.AddClient(client)
 
@@ -200,11 +213,11 @@ func (client *Client) Start() {
 	}
 
 	fmt.Println("\nClient connected!")
-	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(client.NameData[:], "\x00")))
-	fmt.Printf(" * SessionID:      %x\n", client.SessionID)
-	fmt.Printf(" * SessionSecret:  %08x\n", client.SessionSecret)
-	fmt.Printf(" * PlayerUniqueID: %016x\n", client.PlayerUniqueID)
-	fmt.Printf(" * PlayerID:       %d\n", client.PlayerID)
+	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(client.Info.NameData[:], "\x00")))
+	fmt.Printf(" * SessionID:      %x\n", client.Info.SessionID)
+	fmt.Printf(" * SessionSecret:  %08x\n", client.Info.SessionSecret)
+	fmt.Printf(" * PlayerUniqueID: %016x\n", client.Info.PlayerUniqueID)
+	fmt.Printf(" * PlayerID:       %d\n", client.Info.PlayerID)
 
 	client.Loop()
 	fmt.Println("Terminating client")
