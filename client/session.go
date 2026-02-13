@@ -178,3 +178,9 @@ func (session *Session) Run() {
 	<-session.ctx.Done()
 	fmt.Println("Terminating client")
 }
+
+func (s *Session) Shutdown() {
+	fmt.Printf("Session shutting down...\n")
+	// TODO: Actually close stuff
+	fmt.Printf("Session terminated\n")
+}
