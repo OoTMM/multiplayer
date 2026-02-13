@@ -12,7 +12,7 @@ import (
 const GAME_OP_WRITE_WAL_ITEM = 0x01
 const GAME_OP_EXCHANGE_POS = 0x02
 
-func gameReadWalItem(client *Client, data []byte) (*protocol.WalEntry, error) {
+func gameReadWalItem(session *Session, data []byte) (*protocol.WalEntry, error) {
 	if len(data) < 10 {
 		return nil, fmt.Errorf("Invalid WAL item data length: %d bytes", len(data))
 	}
@@ -22,7 +22,7 @@ func gameReadWalItem(client *Client, data []byte) (*protocol.WalEntry, error) {
 		Type: protocol.WAL_ENTRY_ITEM,
 		Item: walItem,
 	}
-	walItem.PlayerFromUniqueID = client.Info.PlayerUniqueID
+	walItem.PlayerFromUniqueID = session.info.PlayerUniqueID
 	walItem.PlayerFrom = data[0]
 	walItem.PlayerTo = data[1]
 	walItem.GameID = data[2]
@@ -44,8 +44,8 @@ func gameReadWalItem(client *Client, data []byte) (*protocol.WalEntry, error) {
 	return walEntry, nil
 }
 
-func gamePacketWriteWalItem(client *Client, data []byte) error {
-	walEntry, err := gameReadWalItem(client, data)
+func gamePacketWriteWalItem(session *Session, data []byte) error {
+	walEntry, err := gameReadWalItem(session, data)
 	if err != nil {
 		return fmt.Errorf("Failed to read WAL item: %v", err)
 	}
@@ -57,31 +57,32 @@ func gamePacketWriteWalItem(client *Client, data []byte) error {
 	fmt.Printf(" * GameID:             %d\n", walEntry.Item.GameID)
 	fmt.Printf(" * Key:                %08x\n", walEntry.Item.Key)
 	fmt.Printf(" * ItemID:             %d\n", walEntry.Item.ItemID)
-	return client.SendPacketEmpty()
+
+	return session.conn.WritePacketEmpty()
 }
 
-func sendPos(client *Client, pos *ClientPos, name []byte) error {
+func sendPos(session *Session, pos *GamePos, name []byte) error {
 	data := make([]byte, 24)
 
 	binary.BigEndian.PutUint16(data[0:2], pos.Key)
-	binary.BigEndian.PutUint16(data[2:4], uint16(client.Info.PlayerUniqueID&0xffff))
+	binary.BigEndian.PutUint16(data[2:4], uint16(session.info.PlayerUniqueID&0xffff))
 	binary.BigEndian.PutUint32(data[4:8], math.Float32bits(pos.X))
 	binary.BigEndian.PutUint32(data[8:12], math.Float32bits(pos.Y))
 	binary.BigEndian.PutUint32(data[12:16], math.Float32bits(pos.Z))
 	copy(data[16:24], name)
-	return client.SendPacket(data)
+	return session.conn.WritePacket(data)
 }
 
-func gamePacketExchangePos(client *Client, data []byte) error {
+func gamePacketExchangePos(session *Session, data []byte) error {
 	if len(data) < 14 {
 		return fmt.Errorf("Invalid exchange pos data length: %d bytes", len(data))
 	}
 
 	/* Store the incoming position */
-	client.Pos.Key = binary.BigEndian.Uint16(data[0:2])
-	client.Pos.X = math.Float32frombits(binary.BigEndian.Uint32(data[2:6]))
-	client.Pos.Y = math.Float32frombits(binary.BigEndian.Uint32(data[6:10]))
-	client.Pos.Z = math.Float32frombits(binary.BigEndian.Uint32(data[10:14]))
+	session.Pos.Key = binary.BigEndian.Uint16(data[0:2])
+	session.Pos.X = math.Float32frombits(binary.BigEndian.Uint32(data[2:6]))
+	session.Pos.Y = math.Float32frombits(binary.BigEndian.Uint32(data[6:10]))
+	session.Pos.Z = math.Float32frombits(binary.BigEndian.Uint32(data[10:14]))
 
 	/* Echo */
 	//err := sendPos(client, &client.Pos, client.Info.NameData[:])
@@ -90,33 +91,33 @@ func gamePacketExchangePos(client *Client, data []byte) error {
 	//}
 
 	/* DEBUG */
-	pos2 := &ClientPos{
+	pos2 := &GamePos{
 		Key: 0xffff,
-		X:   client.Pos.X + 40.0,
-		Y:   client.Pos.Y,
-		Z:   client.Pos.Z,
+		X:   session.Pos.X + 40.0,
+		Y:   session.Pos.Y,
+		Z:   session.Pos.Z,
 	}
 
-	pos3 := &ClientPos{
+	pos3 := &GamePos{
 		Key: 0xffff,
-		X:   client.Pos.X + 60.0,
-		Y:   client.Pos.Y,
-		Z:   client.Pos.Z,
+		X:   session.Pos.X + 60.0,
+		Y:   session.Pos.Y,
+		Z:   session.Pos.Z,
 	}
 
-	pos4 := &ClientPos{
+	pos4 := &GamePos{
 		Key: 0xffff,
-		X:   client.Pos.X + 80.0,
-		Y:   client.Pos.Y,
-		Z:   client.Pos.Z,
+		X:   session.Pos.X + 80.0,
+		Y:   session.Pos.Y,
+		Z:   session.Pos.Z,
 	}
 
-	sendPos(client, pos2, client.Info.NameData[:])
-	sendPos(client, pos3, client.Info.NameData[:])
-	sendPos(client, pos4, client.Info.NameData[:])
+	sendPos(session, pos2, session.info.NameData[:])
+	sendPos(session, pos3, session.info.NameData[:])
+	sendPos(session, pos4, session.info.NameData[:])
 
 	/* Empty packet to signal end of exchange */
-	return client.SendPacketEmpty()
+	return session.conn.WritePacketEmpty()
 }
 
 func gamePacketUnknown(op byte) error {
@@ -124,10 +125,10 @@ func gamePacketUnknown(op byte) error {
 	return nil
 }
 
-func GamePacketHandler(client *Client, payload []byte) error {
+func GamePacketHandler(session *Session, payload []byte) error {
 	if len(payload) == 0 {
 		/* Empty packet, reply with empty packet too */
-		return client.SendPacketEmpty()
+		return session.conn.WritePacketEmpty()
 	}
 
 	op := payload[0]
@@ -135,9 +136,9 @@ func GamePacketHandler(client *Client, payload []byte) error {
 
 	switch op {
 	case GAME_OP_WRITE_WAL_ITEM:
-		return gamePacketWriteWalItem(client, data)
+		return gamePacketWriteWalItem(session, data)
 	case GAME_OP_EXCHANGE_POS:
-		return gamePacketExchangePos(client, data)
+		return gamePacketExchangePos(session, data)
 	default:
 		return gamePacketUnknown(op)
 	}
