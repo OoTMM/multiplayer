@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"net"
+	"time"
+
+	"github.com/OoTMM/multiplayer/protocol"
 )
 
 type SessionInfo struct {
@@ -23,7 +27,10 @@ type GamePos struct {
 }
 
 type Session struct {
+	app    *App
 	conn   *IPCConn
+	server *protocol.Conn
+
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -31,10 +38,11 @@ type Session struct {
 	Pos  GamePos
 }
 
-func NewSession(conn *IPCConn) *Session {
+func NewSession(app *App, conn *IPCConn) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Session{
+		app:    app,
 		conn:   conn,
 		ctx:    ctx,
 		cancel: cancel,
@@ -83,7 +91,7 @@ func (s *Session) handshake() error {
 	return nil
 }
 
-func (s *Session) Loop() {
+func (s *Session) ipcLoop() {
 	for {
 		payload, err := s.conn.ReadPacket()
 		if err != nil {
@@ -96,6 +104,53 @@ func (s *Session) Loop() {
 			fmt.Printf("Error processing packet: %v\n", err)
 			return
 		}
+	}
+}
+
+func (s *Session) serverConnect() error {
+	/* Establish */
+	conn, err := net.Dial("tcp", s.app.config.ServerAddress)
+	if err != nil {
+		return fmt.Errorf("Failed to connect to server: %v", err)
+	}
+
+	/* Perform handshake */
+	protocolConn := protocol.NewConn(conn)
+	protocolConn.Start()
+
+	hello := protocol.ClientHello{
+		SessionID:      s.info.SessionID,
+		SessionSecret:  s.info.SessionSecret,
+		WalIndex:       0,
+		PlayerName:     s.info.NameData,
+		PlayerUniqueID: s.info.PlayerUniqueID,
+		PlayerID:       s.info.PlayerID,
+	}
+	err = protocolConn.WritePacket(protocol.SerializeClientHello(&hello))
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("Failed to send handshake packet: %v", err)
+	}
+	s.server = protocolConn
+	return nil
+}
+
+func (s *Session) serverPerform() {
+	for {
+
+	}
+}
+
+func (s *Session) serverLoop() error {
+	for {
+		err := s.serverConnect()
+		if err != nil {
+			fmt.Printf("Error connecting to server: %v\n", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		s.serverPerform()
 	}
 }
 
@@ -117,6 +172,9 @@ func (session *Session) Run() {
 	fmt.Printf(" * PlayerUniqueID: %016x\n", session.info.PlayerUniqueID)
 	fmt.Printf(" * PlayerID:       %d\n", session.info.PlayerID)
 
-	session.Loop()
+	go session.ipcLoop()
+	go session.serverLoop()
+
+	<-session.ctx.Done()
 	fmt.Println("Terminating client")
 }

@@ -22,7 +22,7 @@ func NewApp(Config *Config) *App {
 
 func (app *App) handleClient(conn net.Conn) {
 	ipc := NewIPCConn(conn)
-	session := NewSession(ipc)
+	session := NewSession(app, ipc)
 	app.session = session
 	session.Run()
 }

@@ -40,7 +40,7 @@ func (app *App) JoinSession(client *Client, info *SessionInfo) (*Session, error)
 	} else {
 		storedInfo, err := LoadSessionInfo(info.ID)
 		if err != nil {
-			return nil, fmt.Errorf("could not load session secret")
+			return nil, fmt.Errorf("could not load session secret: %v", err)
 		}
 		if storedInfo != nil && storedInfo.Secret != info.Secret {
 			return nil, fmt.Errorf("invalid session secret")

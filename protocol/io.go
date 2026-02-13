@@ -28,7 +28,7 @@ func NetPacketSend(conn net.Conn, data []byte) error {
 func NetPacketRecv(conn net.Conn) ([]byte, error) {
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	header := make([]byte, 4)
-	_, err := conn.Read(header)
+	_, err := io.ReadFull(conn, header)
 	if err != nil {
 		return nil, err
 	}

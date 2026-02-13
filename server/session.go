@@ -16,6 +16,9 @@ func SessionPath(sessionID [16]byte) string {
 func LoadSessionInfo(sessionID [16]byte) (*SessionInfo, error) {
 	path := SessionPath(sessionID) + "/secret.bin"
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +93,7 @@ func (s *Session) run() {
 	}
 	close(s.initChan)
 
-	fmt.Printf("Session started: %032x", s.info.ID)
+	fmt.Printf("Session started: %032x\n", s.info.ID)
 }
 
 func (s *Session) AddClient(client *Client) {
