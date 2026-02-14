@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"sync"
 
 	"github.com/OoTMM/multiplayer/protocol"
@@ -10,7 +9,7 @@ import (
 
 type App struct {
 	config   *Config
-	listener net.Listener
+	listener *protocol.ConnListener
 
 	clients      map[*Client]bool
 	clientsMutex sync.RWMutex
@@ -52,16 +51,13 @@ func (app *App) JoinSession(client *Client, info *SessionInfo) (*Session, error)
 	return session, nil
 }
 
-func (app *App) handleClient(tcpConn net.Conn) {
-	conn := protocol.NewConn(tcpConn)
-	client := NewClient(app, conn)
-
+func (app *App) AddClient(client *Client) {
 	app.clientsMutex.Lock()
 	app.clients[client] = true
 	app.clientsMutex.Unlock()
+}
 
-	client.Run()
-
+func (app *App) RemoveClient(client *Client) {
 	app.clientsMutex.Lock()
 	delete(app.clients, client)
 	app.clientsMutex.Unlock()
@@ -69,7 +65,7 @@ func (app *App) handleClient(tcpConn net.Conn) {
 
 func (app *App) Run() {
 	bindAddr := fmt.Sprintf("%s:%d", app.config.BindAddress, app.config.BindPort)
-	listener, err := net.Listen("tcp", bindAddr)
+	listener, err := protocol.ListenProtocol(bindAddr)
 	if err != nil {
 		fmt.Printf("failed to bind to address %s: %v\n", bindAddr, err)
 		return
@@ -84,6 +80,6 @@ func (app *App) Run() {
 			fmt.Printf("failed to accept connection: %v\n", err)
 			continue
 		}
-		go app.handleClient(conn)
+		go HandleClient(app, conn)
 	}
 }

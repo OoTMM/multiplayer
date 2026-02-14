@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -18,33 +19,30 @@ func gameReadWalItem(session *Session, data []byte) (*protocol.WalEntry, error) 
 
 	walItem := &protocol.WalItem{}
 	walEntry := &protocol.WalEntry{
-		ID:   "Test", // TODO: Generate a proper ID
-		Type: "ITEM",
+		Type: protocol.WalTypeItem,
 		Item: walItem,
 	}
-	walItem.PlayerID = "test" // TODO: Map player ID to unique ID
+	walItem.PlayerID = session.info.PlayerID
 	walItem.From = data[0]
 	walItem.To = data[1]
 	walItem.GameID = data[2]
-	//flags := data[3]
+	flags := data[3]
 	walItem.Key = binary.BigEndian.Uint32(data[4:8])
 	walItem.ItemID = binary.BigEndian.Uint16(data[8:10])
 
-	/*
-		if (flags & 0x01) != 0 {
-			buf := make([]byte, 16)
-			_, err := rand.Read(buf)
-			if err != nil {
-				return nil, fmt.Errorf("Failed to generate random UUID: %v", err)
-			}
-		} else {
-			walEntry.UUID[0] = 0x01
-			walEntry.UUID[1] = walItem.PlayerFrom
-			walEntry.UUID[2] = walItem.PlayerTo
-			walEntry.UUID[3] = walItem.GameID
-			binary.LittleEndian.PutUint32(walEntry.UUID[4:8], walItem.Key)
+	if (flags & 0x01) != 0 {
+		buf := make([]byte, 16)
+		_, err := rand.Read(buf)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to generate random UUID: %v", err)
 		}
-	*/
+	} else {
+		walEntry.ID[0] = 0x01
+		walEntry.ID[1] = walItem.From
+		walEntry.ID[2] = walItem.To
+		walEntry.ID[3] = walItem.GameID
+		binary.LittleEndian.PutUint32(walEntry.ID[4:8], walItem.Key)
+	}
 
 	return walEntry, nil
 }
@@ -68,9 +66,10 @@ func gamePacketWriteWalItem(session *Session, data []byte) error {
 
 func sendPos(session *Session, pos *GamePos, name []byte) error {
 	data := make([]byte, 24)
+	colorIndex := binary.BigEndian.Uint16(session.info.PlayerID[14:16])
 
 	binary.BigEndian.PutUint16(data[0:2], pos.Key)
-	binary.BigEndian.PutUint16(data[2:4], uint16(session.info.PlayerUniqueID&0xffff))
+	binary.BigEndian.PutUint16(data[2:4], colorIndex)
 	binary.BigEndian.PutUint32(data[4:8], math.Float32bits(pos.X))
 	binary.BigEndian.PutUint32(data[8:12], math.Float32bits(pos.Y))
 	binary.BigEndian.PutUint32(data[12:16], math.Float32bits(pos.Z))

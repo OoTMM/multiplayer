@@ -14,11 +14,11 @@ import (
 )
 
 type SessionInfo struct {
-	SessionID      [16]byte
-	SessionSecret  uint32
-	PlayerUniqueID uint64
-	PlayerID       uint8
-	NameData       [8]byte
+	SessionID     [16]byte
+	SessionSecret uint32
+	PlayerID      [16]byte
+	WorldID       uint8
+	NameData      [8]byte
 }
 
 type GamePos struct {
@@ -53,7 +53,7 @@ func sessionHandshake(conn IPCConn) (*SessionInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(pkt) < 43 {
+	if len(pkt) < 51 {
 		return nil, fmt.Errorf("session handshake: Packet too short: %d bytes", len(pkt))
 	}
 	pktMagic := string(pkt[0:6])
@@ -67,13 +67,8 @@ func sessionHandshake(conn IPCConn) (*SessionInfo, error) {
 	copy(info.NameData[:], pkt[6:14])
 	copy(info.SessionID[:], pkt[14:30])
 	info.SessionSecret = binary.BigEndian.Uint32(pkt[30:34])
-	info.PlayerUniqueID = binary.BigEndian.Uint64(pkt[34:42])
-	info.PlayerID = pkt[42]
-
-	/* We have an UUID, find the matching session */
-	//session := client.app.GetSession(client.Info.SessionID)
-	//client.session = session
-	//session.AddClient(client)
+	copy(info.PlayerID[:], pkt[34:50])
+	info.WorldID = pkt[50]
 
 	/* Respond */
 	resp := make([]byte, 6+8)
@@ -108,7 +103,7 @@ func StartSession(conn net.Conn, config *Config, ctx context.Context) {
 		return
 	}
 
-	wal, err := protocol.OpenWAL(path + "/wal.jsonl")
+	wal, err := protocol.OpenWAL(path + "/wal.bin")
 	if err != nil {
 		fmt.Printf("Failed to open WAL: %v\n", err)
 		return
@@ -156,12 +151,12 @@ func (s *Session) serverConnect() error {
 	}
 
 	hello := protocol.ClientHello{
-		SessionID:      s.info.SessionID,
-		SessionSecret:  s.info.SessionSecret,
-		WalIndex:       0,
-		PlayerName:     s.info.NameData,
-		PlayerUniqueID: s.info.PlayerUniqueID,
-		PlayerID:       s.info.PlayerID,
+		SessionID:     s.info.SessionID,
+		SessionSecret: s.info.SessionSecret,
+		WalIndex:      s.wal.Count(),
+		PlayerName:    s.info.NameData,
+		PlayerID:      s.info.PlayerID,
+		WorldID:       s.info.WorldID,
 	}
 	err = conn.WritePacket(protocol.SerializeClientHello(&hello))
 	if err != nil {
@@ -218,10 +213,10 @@ func (s *Session) Run() {
 
 	fmt.Println("\nClient connected!")
 	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(s.info.NameData[:], "\x00")))
-	fmt.Printf(" * SessionID:      %x\n", s.info.SessionID)
+	fmt.Printf(" * SessionID:      %032x\n", s.info.SessionID)
 	fmt.Printf(" * SessionSecret:  %08x\n", s.info.SessionSecret)
-	fmt.Printf(" * PlayerUniqueID: %016x\n", s.info.PlayerUniqueID)
-	fmt.Printf(" * PlayerID:       %d\n", s.info.PlayerID)
+	fmt.Printf(" * PlayerID:	   %032x\n", s.info.PlayerID)
+	fmt.Printf(" * WorldID:        %d\n", s.info.WorldID)
 
 	s.loop()
 

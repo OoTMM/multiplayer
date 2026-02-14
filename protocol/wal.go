@@ -11,7 +11,7 @@ import (
 type WAL struct {
 	file    *os.File
 	mu      sync.RWMutex
-	set     map[string]struct{}
+	set     map[[16]byte]struct{}
 	entries []*WalEntry
 	count   uint32
 }
@@ -43,7 +43,7 @@ func OpenWAL(path string) (*WAL, error) {
 
 	wal := &WAL{
 		file:    file,
-		set:     make(map[string]struct{}),
+		set:     make(map[[16]byte]struct{}),
 		entries: make([]*WalEntry, 0),
 		count:   0,
 	}
@@ -122,6 +122,12 @@ func (wal *WAL) Get(index uint32) *WalEntry {
 		return nil
 	}
 	return wal.entries[index]
+}
+
+func (wal *WAL) Count() uint32 {
+	wal.mu.RLock()
+	defer wal.mu.RUnlock()
+	return wal.count
 }
 
 func (wal *WAL) Close() error {

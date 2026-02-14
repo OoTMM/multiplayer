@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/OoTMM/multiplayer/protocol"
@@ -9,18 +10,33 @@ import (
 type Client struct {
 	App  *App
 	Conn *protocol.Conn
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewClient(app *App, conn *protocol.Conn) *Client {
-	return &Client{
-		App:  app,
-		Conn: conn,
+func HandleClient(app *App, conn *protocol.Conn) {
+	defer conn.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := &Client{
+		App:    app,
+		Conn:   conn,
+		ctx:    ctx,
+		cancel: cancel,
 	}
-}
 
-func (c *Client) process() {
+	/* Register the client */
+	app.AddClient(client)
+	defer app.RemoveClient(client)
+
+	/* Display client connection info */
+	fmt.Printf("Client connected from %s\n", conn.RemoteAddr().String())
+
 	/* Process the hello packet */
-	helloData, err := c.Conn.ReadPacket()
+	helloData, err := conn.ReadPacket()
 	if err != nil {
 		fmt.Printf("failed to read hello packet: %v\n", err)
 		return
@@ -33,18 +49,20 @@ func (c *Client) process() {
 	sessionInfo := &SessionInfo{}
 	copy(sessionInfo.ID[:], hello.SessionID[:])
 	sessionInfo.Secret = hello.SessionSecret
-	_, err = c.App.JoinSession(c, sessionInfo)
+
+	_, err = app.JoinSession(client, sessionInfo)
 	if err != nil {
 		fmt.Printf("failed to join session: %v\n", err)
 		return
 	}
 	fmt.Printf("Client %s joined session %032x\n", string(hello.PlayerName[:]), sessionInfo.ID)
+
+	/* Wait for the client to be disconnected */
+	<-ctx.Done()
+	fmt.Printf("Client disconnected from %s\n", conn.RemoteAddr().String())
 }
 
-func (c *Client) Run() {
-	fmt.Printf("Client connected from %s\n", c.Conn.RemoteAddr().String())
-	c.Conn.Start()
-	go c.process()
-	<-c.Conn.Done()
-	fmt.Printf("Client disconnected from %s\n", c.Conn.RemoteAddr().String())
+func (c *Client) Shutdown() {
+	c.cancel()
+	c.Conn.Close()
 }

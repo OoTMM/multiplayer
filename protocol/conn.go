@@ -129,3 +129,27 @@ func DialProtocol(address string) (*Conn, error) {
 	}
 	return newProtocolConn(conn), nil
 }
+
+type ConnListener struct {
+	listener net.Listener
+}
+
+func ListenProtocol(address string) (*ConnListener, error) {
+	ln, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to listen on address %s: %v", address, err)
+	}
+	return &ConnListener{listener: ln}, nil
+}
+
+func (l *ConnListener) Accept() (*Conn, error) {
+	conn, err := l.listener.Accept()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to accept connection: %v", err)
+	}
+	return newProtocolConn(conn), nil
+}
+
+func (l *ConnListener) Close() {
+	l.listener.Close()
+}
