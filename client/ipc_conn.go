@@ -126,3 +126,8 @@ func (c *IPCConn) WritePacket(payload []byte) error {
 func (c *IPCConn) WritePacketEmpty() error {
 	return c.WritePacket([]byte{})
 }
+
+func (c *IPCConn) Close() {
+	c.cancel()
+	c.conn.Close()
+}

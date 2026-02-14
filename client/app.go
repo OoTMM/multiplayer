@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sync"
 
 	"github.com/natefinch/npipe"
 )
@@ -12,12 +11,9 @@ import (
 type App struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
 
 	config   *Config
 	listener net.Listener
-
-	session *Session
 }
 
 func NewApp(Config *Config, ctx context.Context) *App {
@@ -30,10 +26,13 @@ func NewApp(Config *Config, ctx context.Context) *App {
 }
 
 func (app *App) handleClient(conn net.Conn) {
-	ipc := NewIPCConn(conn)
-	session := NewSession(app, ipc)
-	app.session = session
+	defer conn.Close()
+
+	fmt.Printf("Accepted connection from %s\n", conn.RemoteAddr().String())
+	//ipc := NewIPCConn(conn)
+	session := NewSession(conn, app.config, app.ctx)
 	session.Run()
+	fmt.Printf("Closed connection from %s\n", conn.RemoteAddr().String())
 }
 
 func (app *App) loop() {
@@ -61,10 +60,7 @@ func (app *App) loop() {
 			continue
 		}
 
-		fmt.Printf("Accepted connection from %s\n", conn.RemoteAddr().String())
 		app.handleClient(conn)
-		conn.Close()
-		fmt.Printf("Closed connection from %s\n", conn.RemoteAddr().String())
 	}
 }
 
@@ -77,27 +73,13 @@ func (app *App) Run() {
 	}
 	app.listener = listener
 
-	/* Loop */
-	app.wg.Add(1)
 	go func() {
-		defer app.wg.Done()
-		app.loop()
+		<-app.ctx.Done()
+		fmt.Printf("App shutting down...\n")
+		listener.Close()
 	}()
-	<-app.ctx.Done()
 
-	fmt.Printf("App shutting down...\n")
-
-	/* Close the listener */
-	listener.Close()
-
-	/* Wait for loop to exit */
-	app.wg.Wait()
-
-	/* Close the session */
-	if app.session != nil {
-		app.session.Shutdown()
-		app.session = nil
-	}
+	app.loop()
 }
 
 func (app *App) Shutdown() {

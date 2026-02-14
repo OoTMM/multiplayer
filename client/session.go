@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/OoTMM/multiplayer/protocol"
@@ -27,8 +28,9 @@ type GamePos struct {
 }
 
 type Session struct {
-	app    *App
 	conn   *IPCConn
+	config *Config
+
 	server *protocol.Conn
 
 	ctx    context.Context
@@ -38,12 +40,13 @@ type Session struct {
 	Pos  GamePos
 }
 
-func NewSession(app *App, conn *IPCConn) *Session {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewSession(conn net.Conn, config *Config, ctx context.Context) *Session {
+	ctx, cancel := context.WithCancel(ctx)
+	ipc := NewIPCConn(conn)
 
 	return &Session{
-		app:    app,
-		conn:   conn,
+		conn:   ipc,
+		config: config,
 		ctx:    ctx,
 		cancel: cancel,
 		info:   SessionInfo{},
@@ -96,12 +99,14 @@ func (s *Session) ipcLoop() {
 		payload, err := s.conn.ReadPacket()
 		if err != nil {
 			fmt.Printf("Error reading packet: %v\n", err)
+			s.Shutdown()
 			return
 		}
 
 		err = GamePacketHandler(s, payload)
 		if err != nil {
 			fmt.Printf("Error processing packet: %v\n", err)
+			s.Shutdown()
 			return
 		}
 	}
@@ -109,7 +114,7 @@ func (s *Session) ipcLoop() {
 
 func (s *Session) serverConnect() error {
 	/* Establish */
-	conn, err := net.Dial("tcp", s.app.config.ServerAddress)
+	conn, err := net.Dial("tcp", s.config.ServerAddress)
 	if err != nil {
 		return fmt.Errorf("Failed to connect to server: %v", err)
 	}
@@ -137,12 +142,24 @@ func (s *Session) serverConnect() error {
 
 func (s *Session) serverPerform() {
 	for {
-
+		select {
+		case <-s.ctx.Done():
+			s.server.Close()
+			return
+		default:
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 }
 
-func (s *Session) serverLoop() error {
+func (s *Session) serverLoop() {
 	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+		}
+
 		err := s.serverConnect()
 		if err != nil {
 			fmt.Printf("Error connecting to server: %v\n", err)
@@ -154,33 +171,38 @@ func (s *Session) serverLoop() error {
 	}
 }
 
-func (session *Session) Run() {
-	/* Basic setup */
-	//defer session.conn.Close()
+func (s *Session) loop() {
+	var wg sync.WaitGroup
+	wg.Go(s.ipcLoop)
+	wg.Go(s.serverLoop)
+	wg.Wait()
+}
+
+func (s *Session) Run() {
+	go func() {
+		<-s.ctx.Done()
+		s.conn.Close()
+	}()
 
 	/* Wait for handshake */
-	err := session.handshake()
+	err := s.handshake()
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		return
 	}
 
 	fmt.Println("\nClient connected!")
-	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(session.info.NameData[:], "\x00")))
-	fmt.Printf(" * SessionID:      %x\n", session.info.SessionID)
-	fmt.Printf(" * SessionSecret:  %08x\n", session.info.SessionSecret)
-	fmt.Printf(" * PlayerUniqueID: %016x\n", session.info.PlayerUniqueID)
-	fmt.Printf(" * PlayerID:       %d\n", session.info.PlayerID)
+	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(s.info.NameData[:], "\x00")))
+	fmt.Printf(" * SessionID:      %x\n", s.info.SessionID)
+	fmt.Printf(" * SessionSecret:  %08x\n", s.info.SessionSecret)
+	fmt.Printf(" * PlayerUniqueID: %016x\n", s.info.PlayerUniqueID)
+	fmt.Printf(" * PlayerID:       %d\n", s.info.PlayerID)
 
-	go session.ipcLoop()
-	go session.serverLoop()
+	s.loop()
 
-	<-session.ctx.Done()
 	fmt.Println("Terminating client")
 }
 
 func (s *Session) Shutdown() {
-	fmt.Printf("Session shutting down...\n")
-	// TODO: Actually close stuff
-	fmt.Printf("Session terminated\n")
+	s.cancel()
 }
