@@ -114,14 +114,10 @@ func (s *Session) ipcLoop() {
 
 func (s *Session) serverConnect() error {
 	/* Establish */
-	conn, err := net.Dial("tcp", s.config.ServerAddress)
+	conn, err := protocol.DialProtocol(s.config.ServerAddress)
 	if err != nil {
 		return fmt.Errorf("Failed to connect to server: %v", err)
 	}
-
-	/* Perform handshake */
-	protocolConn := protocol.NewConn(conn)
-	protocolConn.Start()
 
 	hello := protocol.ClientHello{
 		SessionID:      s.info.SessionID,
@@ -131,12 +127,12 @@ func (s *Session) serverConnect() error {
 		PlayerUniqueID: s.info.PlayerUniqueID,
 		PlayerID:       s.info.PlayerID,
 	}
-	err = protocolConn.WritePacket(protocol.SerializeClientHello(&hello))
+	err = conn.WritePacket(protocol.SerializeClientHello(&hello))
 	if err != nil {
 		conn.Close()
 		return fmt.Errorf("Failed to send handshake packet: %v", err)
 	}
-	s.server = protocolConn
+	s.server = conn
 	return nil
 }
 

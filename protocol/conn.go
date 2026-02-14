@@ -4,31 +4,26 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 )
 
 type Conn struct {
 	conn       net.Conn
-	context    context.Context
+	ctx        context.Context
 	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 	packetsIn  chan []byte
 	packetsOut chan []byte
 }
 
-func NewConn(conn net.Conn) *Conn {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &Conn{
-		conn:       conn,
-		context:    ctx,
-		cancel:     cancel,
-		packetsIn:  make(chan []byte, 64),
-		packetsOut: make(chan []byte, 64),
-	}
-}
-
 func (c *Conn) onError(err error) {
-	fmt.Printf("Conn error: %v\n", err)
-	c.cancel()
+	select {
+	case <-c.ctx.Done():
+	default:
+		fmt.Printf("Conn error: %v\n", err)
+		c.cancel()
+	}
 }
 
 func (c *Conn) readLoop() {
@@ -45,7 +40,7 @@ func (c *Conn) readLoop() {
 func (c *Conn) writeLoop() {
 	for {
 		select {
-		case <-c.context.Done():
+		case <-c.ctx.Done():
 			return
 		case data := <-c.packetsOut:
 			err := NetPacketSend(c.conn, data)
@@ -60,7 +55,7 @@ func (c *Conn) writeLoop() {
 func (c *Conn) heartbeat() {
 	for {
 		select {
-		case <-c.context.Done():
+		case <-c.ctx.Done():
 			return
 		case <-time.After(5 * time.Second):
 			c.packetsOut <- []byte{}
@@ -68,10 +63,36 @@ func (c *Conn) heartbeat() {
 	}
 }
 
+func newProtocolConn(tcp net.Conn) *Conn {
+	if tcp, ok := tcp.(*net.TCPConn); ok {
+		tcp.SetNoDelay(true)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-ctx.Done()
+		tcp.Close()
+	}()
+
+	conn := &Conn{
+		conn:       tcp,
+		ctx:        ctx,
+		cancel:     cancel,
+		packetsIn:  make(chan []byte, 64),
+		packetsOut: make(chan []byte, 64),
+	}
+
+	conn.wg.Go(conn.readLoop)
+	conn.wg.Go(conn.writeLoop)
+	conn.wg.Go(conn.heartbeat)
+
+	return conn
+}
+
 func (c *Conn) ReadPacket() ([]byte, error) {
 	for {
 		select {
-		case <-c.context.Done():
+		case <-c.ctx.Done():
 			return nil, fmt.Errorf("Client disconnected")
 		case data := <-c.packetsIn:
 			if len(data) == 0 {
@@ -85,7 +106,7 @@ func (c *Conn) ReadPacket() ([]byte, error) {
 
 func (c *Conn) WritePacket(data []byte) error {
 	select {
-	case <-c.context.Done():
+	case <-c.ctx.Done():
 		return fmt.Errorf("WritePacket: Client disconnected")
 	case c.packetsOut <- data:
 		return nil
@@ -96,22 +117,15 @@ func (c *Conn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
 
-func (c *Conn) Start() {
-	/* Set TCP_NODELAY */
-	if tcpConn, ok := c.conn.(*net.TCPConn); ok {
-		tcpConn.SetNoDelay(true)
-	}
-
-	go c.heartbeat()
-	go c.readLoop()
-	go c.writeLoop()
-}
-
-func (c *Conn) Done() <-chan struct{} {
-	return c.context.Done()
-}
-
 func (c *Conn) Close() {
 	c.cancel()
-	c.conn.Close()
+	c.wg.Wait()
+}
+
+func DialProtocol(address string) (*Conn, error) {
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to connect to server: %v", err)
+	}
+	return newProtocolConn(conn), nil
 }
