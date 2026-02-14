@@ -30,9 +30,10 @@ type GamePos struct {
 type Session struct {
 	config *Config
 
-	conn   *IPCConn
-	wal    *protocol.WAL
-	server *ServerLink
+	conn      *IPCConn
+	wal       *protocol.WAL
+	server    *ServerLink
+	sendQueue *SendQueue
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -113,14 +114,24 @@ func StartSession(conn net.Conn, config *Config, ctx context.Context) {
 	server := CreateServerLink(config.ServerAddress, info, wal)
 	defer server.Close()
 
+	/* Create the send queue */
+	queuePath := fmt.Sprintf("%s/queue.%d.bin", path, info.WorldID)
+	sendQueue, err := OpenSendQueue(queuePath)
+	if err != nil {
+		fmt.Printf("Failed to open send queue: %v\n", err)
+		return
+	}
+	defer sendQueue.Close()
+
 	session := &Session{
-		conn:   ipc,
-		config: config,
-		ctx:    ctx,
-		wal:    wal,
-		server: server,
-		cancel: cancel,
-		info:   info,
+		conn:      ipc,
+		config:    config,
+		ctx:       ctx,
+		wal:       wal,
+		server:    server,
+		sendQueue: sendQueue,
+		cancel:    cancel,
+		info:      info,
 		Pos: GamePos{
 			Key: 0xffff,
 		},
@@ -157,6 +168,7 @@ func (s *Session) Run() {
 	go func() {
 		<-s.ctx.Done()
 		s.conn.Close()
+		s.server.Close()
 	}()
 
 	fmt.Println("\nClient connected!")

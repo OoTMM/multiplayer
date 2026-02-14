@@ -139,8 +139,8 @@ func (sl *ServerLink) heartbeatLoop(conn net.Conn, ctx context.Context, cancel c
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
-			sl.packetsIn <- []byte{}
+		case <-time.After(1 * time.Second):
+			sl.packetsOut <- []byte{}
 		}
 	}
 }

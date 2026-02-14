@@ -57,7 +57,7 @@ func (c *Conn) heartbeat() {
 		select {
 		case <-c.ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.After(1 * time.Second):
 			c.packetsOut <- []byte{}
 		}
 	}

@@ -53,15 +53,35 @@ func gamePacketWriteWalItem(session *Session, data []byte) error {
 		return fmt.Errorf("Failed to read WAL item: %v", err)
 	}
 	fmt.Println("\nReceived WAL item:")
-	fmt.Printf(" * ID:                 %s\n", walEntry.ID)
-	fmt.Printf(" * PlayerID:           %s\n", walEntry.Item.PlayerID)
+	fmt.Printf(" * ID:                 %032x\n", walEntry.ID)
+	fmt.Printf(" * PlayerID:           %032x\n", walEntry.Item.PlayerID)
 	fmt.Printf(" * From:               %d\n", walEntry.Item.From)
 	fmt.Printf(" * PlayerTo:           %d\n", walEntry.Item.To)
 	fmt.Printf(" * GameID:             %d\n", walEntry.Item.GameID)
 	fmt.Printf(" * Key:                %08x\n", walEntry.Item.Key)
 	fmt.Printf(" * ItemID:             %d\n", walEntry.Item.ItemID)
 
-	return session.conn.WritePacketEmpty()
+	/* Serialize */
+	data, err = protocol.SerializeWalEntry(walEntry)
+	if err != nil {
+		return fmt.Errorf("Failed to serialize WAL entry: %v", err)
+	}
+
+	/* Add to the send queue (critical) */
+	err = session.sendQueue.Add(walEntry.ID, data)
+	if err != nil {
+		return fmt.Errorf("Failed to add WAL entry to send queue: %v", err)
+	}
+
+	/* Reply to the client to confirm reception */
+	err = session.conn.WritePacketEmpty()
+	if err != nil {
+		return fmt.Errorf("Failed to reply to client: %v", err)
+	}
+
+	/* Optimistic send (not a fatal error) */
+
+	return nil
 }
 
 func sendPos(session *Session, pos *GamePos, name []byte) error {

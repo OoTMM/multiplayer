@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/OoTMM/multiplayer/protocol"
 )
@@ -13,6 +14,37 @@ type Client struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	session *Session
+}
+
+func (c *Client) handleRequest(packet []byte) {
+	fmt.Printf("debug: Received packet %v\n", packet)
+}
+
+func (c *Client) handleRequests() {
+	defer c.cancel()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		default:
+		}
+
+		packet, err := c.Conn.ReadPacket()
+		if err != nil {
+			select {
+			case <-c.ctx.Done():
+			default:
+				fmt.Printf("Error reading packet: %v\n", err)
+			}
+			return
+		}
+
+		c.wg.Go(func() { c.handleRequest(packet) })
+	}
 }
 
 func HandleClient(app *App, conn *protocol.Conn) {
@@ -50,15 +82,19 @@ func HandleClient(app *App, conn *protocol.Conn) {
 	copy(sessionInfo.ID[:], hello.SessionID[:])
 	sessionInfo.Secret = hello.SessionSecret
 
-	_, err = app.JoinSession(client, sessionInfo)
+	session, err := app.JoinSession(client, sessionInfo)
 	if err != nil {
 		fmt.Printf("failed to join session: %v\n", err)
 		return
 	}
+	client.session = session
 	fmt.Printf("Client %s joined session %032x\n", string(hello.PlayerName[:]), sessionInfo.ID)
+
+	client.wg.Go(client.handleRequests)
 
 	/* Wait for the client to be disconnected */
 	<-ctx.Done()
+	client.wg.Wait()
 	fmt.Printf("Client disconnected from %s\n", conn.RemoteAddr().String())
 }
 
