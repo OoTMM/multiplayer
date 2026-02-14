@@ -29,9 +29,7 @@ func (app *App) handleClient(conn net.Conn) {
 	defer conn.Close()
 
 	fmt.Printf("Accepted connection from %s\n", conn.RemoteAddr().String())
-	//ipc := NewIPCConn(conn)
-	session := NewSession(conn, app.config, app.ctx)
-	session.Run()
+	StartSession(conn, app.config, app.ctx)
 	fmt.Printf("Closed connection from %s\n", conn.RemoteAddr().String())
 }
 

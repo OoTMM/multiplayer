@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -28,54 +29,46 @@ type GamePos struct {
 }
 
 type Session struct {
-	conn   *IPCConn
 	config *Config
 
+	conn   *IPCConn
 	server *protocol.Conn
+	wal    *protocol.WAL
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	info SessionInfo
+	info *SessionInfo
 	Pos  GamePos
 }
 
-func NewSession(conn net.Conn, config *Config, ctx context.Context) *Session {
-	ctx, cancel := context.WithCancel(ctx)
-	ipc := NewIPCConn(conn)
-
-	return &Session{
-		conn:   ipc,
-		config: config,
-		ctx:    ctx,
-		cancel: cancel,
-		info:   SessionInfo{},
-		Pos: GamePos{
-			Key: 0xffff,
-		},
-	}
+func SessionPath(sessionID [16]byte) string {
+	str := fmt.Sprintf("sessions/%02x/%02x/%028x", sessionID[0], sessionID[1], sessionID[2:])
+	return DataPath(str)
 }
 
-func (s *Session) handshake() error {
+func sessionHandshake(conn IPCConn) (*SessionInfo, error) {
 	/* Handle initial packet */
-	pkt, err := s.conn.ReadRaw()
+	pkt, err := conn.ReadRaw()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(pkt) < 43 {
-		return fmt.Errorf("session handshake: Packet too short: %d bytes", len(pkt))
+		return nil, fmt.Errorf("session handshake: Packet too short: %d bytes", len(pkt))
 	}
 	pktMagic := string(pkt[0:6])
 	if pktMagic != "OoTMM\x00" {
-		return fmt.Errorf("session handshake: Invalid magic")
+		return nil, fmt.Errorf("session handshake: Invalid magic")
 	}
 
 	/* All good, extract infos */
-	copy(s.info.NameData[:], pkt[6:14])
-	copy(s.info.SessionID[:], pkt[14:30])
-	s.info.SessionSecret = binary.BigEndian.Uint32(pkt[30:34])
-	s.info.PlayerUniqueID = binary.BigEndian.Uint64(pkt[34:42])
-	s.info.PlayerID = pkt[42]
+	info := &SessionInfo{}
+
+	copy(info.NameData[:], pkt[6:14])
+	copy(info.SessionID[:], pkt[14:30])
+	info.SessionSecret = binary.BigEndian.Uint32(pkt[30:34])
+	info.PlayerUniqueID = binary.BigEndian.Uint64(pkt[34:42])
+	info.PlayerID = pkt[42]
 
 	/* We have an UUID, find the matching session */
 	//session := client.app.GetSession(client.Info.SessionID)
@@ -85,13 +78,56 @@ func (s *Session) handshake() error {
 	/* Respond */
 	resp := make([]byte, 6+8)
 	copy(resp[0:6], []byte("OoTMM\x00"))
-	binary.BigEndian.PutUint32(resp[6:10], s.conn.info.Token)
-	binary.BigEndian.PutUint32(resp[10:14], s.conn.info.NextPacketID)
-	err = s.conn.WriteRaw(resp)
+	binary.BigEndian.PutUint32(resp[6:10], conn.info.Token)
+	binary.BigEndian.PutUint32(resp[10:14], conn.info.NextPacketID)
+	err = conn.WriteRaw(resp)
 	if err != nil {
-		return fmt.Errorf("New Client: Failed to respond")
+		return nil, fmt.Errorf("New Client: Failed to respond")
 	}
-	return nil
+
+	return info, nil
+}
+
+func StartSession(conn net.Conn, config *Config, ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	ipc := NewIPCConn(conn)
+	defer ipc.Close()
+
+	info, err := sessionHandshake(*ipc)
+	if err != nil {
+		fmt.Printf("Failed to perform handshake: %v\n", err)
+		return
+	}
+
+	path := SessionPath(info.SessionID)
+	err = os.MkdirAll(path, 0700)
+	if err != nil {
+		fmt.Printf("Failed to create session directory: %v\n", err)
+		return
+	}
+
+	wal, err := protocol.OpenWAL(path + "/wal.jsonl")
+	if err != nil {
+		fmt.Printf("Failed to open WAL: %v\n", err)
+		return
+	}
+	defer wal.Close()
+
+	session := &Session{
+		conn:   ipc,
+		config: config,
+		ctx:    ctx,
+		wal:    wal,
+		cancel: cancel,
+		info:   info,
+		Pos: GamePos{
+			Key: 0xffff,
+		},
+	}
+
+	session.Run()
 }
 
 func (s *Session) ipcLoop() {
@@ -179,13 +215,6 @@ func (s *Session) Run() {
 		<-s.ctx.Done()
 		s.conn.Close()
 	}()
-
-	/* Wait for handshake */
-	err := s.handshake()
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
-	}
 
 	fmt.Println("\nClient connected!")
 	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(s.info.NameData[:], "\x00")))

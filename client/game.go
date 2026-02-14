@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -19,27 +18,33 @@ func gameReadWalItem(session *Session, data []byte) (*protocol.WalEntry, error) 
 
 	walItem := &protocol.WalItem{}
 	walEntry := &protocol.WalEntry{
-		Type: protocol.WAL_ENTRY_ITEM,
+		ID:   "Test", // TODO: Generate a proper ID
+		Type: "ITEM",
 		Item: walItem,
 	}
-	walItem.PlayerFromUniqueID = session.info.PlayerUniqueID
-	walItem.PlayerFrom = data[0]
-	walItem.PlayerTo = data[1]
+	walItem.PlayerID = "test" // TODO: Map player ID to unique ID
+	walItem.From = data[0]
+	walItem.To = data[1]
 	walItem.GameID = data[2]
-	flags := data[3]
+	//flags := data[3]
 	walItem.Key = binary.BigEndian.Uint32(data[4:8])
 	walItem.ItemID = binary.BigEndian.Uint16(data[8:10])
 
-	if (flags & 0x01) != 0 {
-		rand.Read(walEntry.UUID[:])
-		walEntry.UUID[0] = 0xff
-	} else {
-		walEntry.UUID[0] = 0x01
-		walEntry.UUID[1] = walItem.PlayerFrom
-		walEntry.UUID[2] = walItem.PlayerTo
-		walEntry.UUID[3] = walItem.GameID
-		binary.LittleEndian.PutUint32(walEntry.UUID[4:8], walItem.Key)
-	}
+	/*
+		if (flags & 0x01) != 0 {
+			buf := make([]byte, 16)
+			_, err := rand.Read(buf)
+			if err != nil {
+				return nil, fmt.Errorf("Failed to generate random UUID: %v", err)
+			}
+		} else {
+			walEntry.UUID[0] = 0x01
+			walEntry.UUID[1] = walItem.PlayerFrom
+			walEntry.UUID[2] = walItem.PlayerTo
+			walEntry.UUID[3] = walItem.GameID
+			binary.LittleEndian.PutUint32(walEntry.UUID[4:8], walItem.Key)
+		}
+	*/
 
 	return walEntry, nil
 }
@@ -50,10 +55,10 @@ func gamePacketWriteWalItem(session *Session, data []byte) error {
 		return fmt.Errorf("Failed to read WAL item: %v", err)
 	}
 	fmt.Println("\nReceived WAL item:")
-	fmt.Printf(" * UUID:               %x\n", walEntry.UUID)
-	fmt.Printf(" * PlayerFromUniqueID: %016x\n", walEntry.Item.PlayerFromUniqueID)
-	fmt.Printf(" * PlayerFrom:         %d\n", walEntry.Item.PlayerFrom)
-	fmt.Printf(" * PlayerTo:           %d\n", walEntry.Item.PlayerTo)
+	fmt.Printf(" * ID:                 %s\n", walEntry.ID)
+	fmt.Printf(" * PlayerID:           %s\n", walEntry.Item.PlayerID)
+	fmt.Printf(" * From:               %d\n", walEntry.Item.From)
+	fmt.Printf(" * PlayerTo:           %d\n", walEntry.Item.To)
 	fmt.Printf(" * GameID:             %d\n", walEntry.Item.GameID)
 	fmt.Printf(" * Key:                %08x\n", walEntry.Item.Key)
 	fmt.Printf(" * ItemID:             %d\n", walEntry.Item.ItemID)
