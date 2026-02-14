@@ -45,3 +45,7 @@ func SerializeWalEntry(entry *WalEntry) ([]byte, error) {
 
 	return append(buf, data...), nil
 }
+
+func DeserializeWalEntry(data []byte) (*WalEntry, error) {
+	return nil, nil
+}
