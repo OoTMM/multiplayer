@@ -41,6 +41,11 @@ func NewIPCConn(conn net.Conn) *IPCConn {
 		},
 	}
 
+	go func() {
+		<-ctx.Done()
+		conn.Close()
+	}()
+
 	return ipc
 }
 
@@ -129,5 +134,4 @@ func (c *IPCConn) WritePacketEmpty() error {
 
 func (c *IPCConn) Close() {
 	c.cancel()
-	c.conn.Close()
 }
