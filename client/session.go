@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/OoTMM/multiplayer/protocol"
 )
@@ -32,8 +31,8 @@ type Session struct {
 	config *Config
 
 	conn   *IPCConn
-	server *protocol.Conn
 	wal    *protocol.WAL
+	server *ServerLink
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -110,11 +109,16 @@ func StartSession(conn net.Conn, config *Config, ctx context.Context) {
 	}
 	defer wal.Close()
 
+	/* Create the server link */
+	server := CreateServerLink(config.ServerAddress, info, wal)
+	defer server.Close()
+
 	session := &Session{
 		conn:   ipc,
 		config: config,
 		ctx:    ctx,
 		wal:    wal,
+		server: server,
 		cancel: cancel,
 		info:   info,
 		Pos: GamePos{
@@ -143,65 +147,9 @@ func (s *Session) ipcLoop() {
 	}
 }
 
-func (s *Session) serverConnect() error {
-	/* Establish */
-	conn, err := protocol.DialProtocol(s.config.ServerAddress)
-	if err != nil {
-		return fmt.Errorf("Failed to connect to server: %v", err)
-	}
-
-	hello := protocol.ClientHello{
-		SessionID:     s.info.SessionID,
-		SessionSecret: s.info.SessionSecret,
-		WalIndex:      s.wal.Count(),
-		PlayerName:    s.info.NameData,
-		PlayerID:      s.info.PlayerID,
-		WorldID:       s.info.WorldID,
-	}
-	err = conn.WritePacket(protocol.SerializeClientHello(&hello))
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("Failed to send handshake packet: %v", err)
-	}
-	s.server = conn
-	return nil
-}
-
-func (s *Session) serverPerform() {
-	for {
-		select {
-		case <-s.ctx.Done():
-			s.server.Close()
-			return
-		default:
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-}
-
-func (s *Session) serverLoop() {
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-		}
-
-		err := s.serverConnect()
-		if err != nil {
-			fmt.Printf("Error connecting to server: %v\n", err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		s.serverPerform()
-	}
-}
-
 func (s *Session) loop() {
 	var wg sync.WaitGroup
 	wg.Go(s.ipcLoop)
-	wg.Go(s.serverLoop)
 	wg.Wait()
 }
 
@@ -225,4 +173,6 @@ func (s *Session) Run() {
 
 func (s *Session) Shutdown() {
 	s.cancel()
+	s.server.Close()
+	s.conn.Close()
 }
