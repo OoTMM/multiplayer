@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/OoTMM/multiplayer/protocol"
 )
@@ -158,9 +159,24 @@ func (s *Session) ipcLoop() {
 	}
 }
 
+func (s *Session) sendQueueLoop() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(10 * time.Second):
+			data := s.sendQueue.Pending()
+			for _, entry := range data {
+				s.server.WritePacket(protocol.SerializeMessage(protocol.NetOpWal, entry))
+			}
+		}
+	}
+}
+
 func (s *Session) loop() {
 	var wg sync.WaitGroup
 	wg.Go(s.ipcLoop)
+	wg.Go(s.sendQueueLoop)
 	wg.Wait()
 }
 

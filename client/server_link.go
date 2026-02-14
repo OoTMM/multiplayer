@@ -207,3 +207,10 @@ func (sl *ServerLink) Close() {
 	sl.cancel()
 	sl.wg.Wait()
 }
+
+func (sl *ServerLink) WritePacket(data []byte) {
+	select {
+	case sl.packetsOut <- data:
+	case <-sl.ctx.Done():
+	}
+}

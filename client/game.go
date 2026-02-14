@@ -80,6 +80,7 @@ func gamePacketWriteWalItem(session *Session, data []byte) error {
 	}
 
 	/* Optimistic send (not a fatal error) */
+	session.server.WritePacket(protocol.SerializeMessage(protocol.NetOpWal, data))
 
 	return nil
 }

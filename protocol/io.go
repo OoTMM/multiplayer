@@ -2,14 +2,12 @@ package protocol
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"net"
 	"time"
 )
 
 func NetPacketSend(conn net.Conn, data []byte) error {
-	fmt.Printf("debug: Send %v\n", data)
 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	header := make([]byte, 4)
 	binary.LittleEndian.PutUint32(header[0:4], uint32(len(data)))
@@ -43,6 +41,5 @@ func NetPacketRecv(conn net.Conn) ([]byte, error) {
 		}
 	}
 	conn.SetReadDeadline(time.Time{})
-	fmt.Printf("debug: Recv %v\n", data)
 	return data, nil
 }
