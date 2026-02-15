@@ -220,3 +220,7 @@ func (sl *ServerLink) WritePacket(data []byte) {
 	case <-sl.ctx.Done():
 	}
 }
+
+func (sl *ServerLink) Packets() <-chan []byte {
+	return sl.packetsIn
+}

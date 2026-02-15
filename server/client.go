@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -25,12 +26,10 @@ func (c *Client) handleRequestWal(data []byte) {
 		fmt.Printf("Failed to deserialize WAL entry: %v\n", err)
 		return
 	}
-	fmt.Printf("debug: Received WAL entry: %v\n", entry)
 	c.session.wal.Append(entry)
 }
 
 func (c *Client) handleRequest(packet []byte) {
-	fmt.Printf("debug: Received packet %v\n", packet)
 	if len(packet) < 1 {
 		return
 	}
@@ -114,7 +113,20 @@ func HandleClient(app *App, conn *protocol.Conn) {
 
 	/* Subscribe to WAL */
 	stream := session.wal.Subscribe(hello.WalIndex, func(index uint32, entry *protocol.WalEntry) {
-		fmt.Printf("debug: WAL #%d: %v\n", index, entry)
+		/* Reply with the WAL entry */
+		/* TODO: Centralize this somewhere */
+		data, err := protocol.SerializeWalEntry(entry)
+		if err != nil {
+			fmt.Printf("Failed to serialize WAL entry: %v\n", err)
+			return
+		}
+		buf := make([]byte, 1+4+len(data))
+		buf[0] = protocol.NetOpWal
+		binary.LittleEndian.PutUint32(buf[1:5], index)
+		copy(buf[5:], data)
+
+		err = client.Conn.WritePacket(buf)
+
 	})
 	defer stream.Close()
 

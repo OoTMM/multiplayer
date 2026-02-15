@@ -173,10 +173,73 @@ func (s *Session) sendQueueLoop() {
 	}
 }
 
+func (s *Session) handleNetPacketWal(packet []byte) error {
+	index := binary.LittleEndian.Uint32(packet[0:4])
+	data := packet[4:]
+
+	entry, err := protocol.DeserializeWalEntry(data)
+	if err != nil {
+		return fmt.Errorf("Failed to deserialize WAL entry: %v", err)
+	}
+
+	walCount := s.wal.Count()
+	if index != walCount {
+		return fmt.Errorf("WAL index mismatch: expected %d, got %d", walCount, index)
+	}
+
+	err = s.wal.Append(entry)
+	if err != nil {
+		return err
+	}
+
+	s.sendQueue.Ack(entry.ID)
+
+	fmt.Printf("Received WAL #%d: %032x\n", index, entry.ID)
+
+	return nil
+}
+
+func (s *Session) handleNetPacket(packet []byte) error {
+	if len(packet) < 1 {
+		return nil
+	}
+
+	fmt.Printf("debug: Packet %v\n", packet)
+
+	op := packet[0]
+	remain := packet[1:]
+
+	switch op {
+	case protocol.NetOpWal:
+		return s.handleNetPacketWal(remain)
+	default:
+		fmt.Printf("warn: Unknown packet op: %02x\n", op)
+		return nil
+	}
+}
+
+func (s *Session) serverLoop() {
+	defer s.cancel()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case packet := <-s.server.Packets():
+			err := s.handleNetPacket(packet)
+			if err != nil {
+				fmt.Printf("Error handling server packet: %v\n", err)
+				return
+			}
+		}
+	}
+}
+
 func (s *Session) loop() {
 	var wg sync.WaitGroup
 	wg.Go(s.ipcLoop)
 	wg.Go(s.sendQueueLoop)
+	wg.Go(s.serverLoop)
 	wg.Wait()
 }
 
