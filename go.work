@@ -2,6 +2,6 @@ go 1.25.7
 
 use (
 	./client
-	./protocol
 	./server
+	./shared
 )

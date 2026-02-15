@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OoTMM/multiplayer/protocol"
+	"github.com/OoTMM/multiplayer/shared"
 )
 
 type SessionInfo struct {
@@ -32,7 +32,7 @@ type Session struct {
 	config *Config
 
 	conn      *IPCConn
-	wal       *protocol.WAL
+	wal       *shared.WAL
 	server    *ServerLink
 	sendQueue *SendQueue
 
@@ -104,7 +104,7 @@ func StartSession(conn net.Conn, config *Config, ctx context.Context) {
 		return
 	}
 
-	wal, err := protocol.OpenWAL(path + "/wal.bin")
+	wal, err := shared.OpenWAL(path + "/wal.bin")
 	if err != nil {
 		fmt.Printf("Failed to open WAL: %v\n", err)
 		return
@@ -167,7 +167,7 @@ func (s *Session) sendQueueLoop() {
 		case <-time.After(10 * time.Second):
 			data := s.sendQueue.Pending()
 			for _, entry := range data {
-				s.server.WritePacket(protocol.SerializeMessage(protocol.NetOpWal, entry))
+				s.server.WritePacket(shared.SerializeMessage(shared.NetOpWal, entry))
 			}
 		}
 	}
@@ -177,7 +177,7 @@ func (s *Session) handleNetPacketWal(packet []byte) error {
 	index := binary.LittleEndian.Uint32(packet[0:4])
 	data := packet[4:]
 
-	entry, err := protocol.DeserializeWalEntry(data)
+	entry, err := shared.DeserializeWalEntry(data)
 	if err != nil {
 		return fmt.Errorf("Failed to deserialize WAL entry: %v", err)
 	}
@@ -210,7 +210,7 @@ func (s *Session) handleNetPacket(packet []byte) error {
 	remain := packet[1:]
 
 	switch op {
-	case protocol.NetOpWal:
+	case shared.NetOpWal:
 		return s.handleNetPacketWal(remain)
 	default:
 		fmt.Printf("warn: Unknown packet op: %02x\n", op)

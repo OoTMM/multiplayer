@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/OoTMM/multiplayer/protocol"
+	"github.com/OoTMM/multiplayer/shared"
 )
 
 type Client struct {
 	App  *App
-	Conn *protocol.Conn
+	Conn *shared.Conn
 
 	ID   [16]byte
 	Name [8]byte
@@ -24,7 +24,7 @@ type Client struct {
 }
 
 func (c *Client) handleRequestWal(data []byte) {
-	entry, err := protocol.DeserializeWalEntry(data)
+	entry, err := shared.DeserializeWalEntry(data)
 	if err != nil {
 		fmt.Printf("Failed to deserialize WAL entry: %v\n", err)
 		return
@@ -40,7 +40,7 @@ func (c *Client) handleRequest(packet []byte) {
 	remain := packet[1:]
 
 	switch op {
-	case protocol.NetOpWal:
+	case shared.NetOpWal:
 		c.handleRequestWal(remain)
 	default:
 		fmt.Printf("warn: Unknown packet op: %02x\n", op)
@@ -71,7 +71,7 @@ func (c *Client) handleRequests() {
 	}
 }
 
-func HandleClient(app *App, conn *protocol.Conn) {
+func HandleClient(app *App, conn *shared.Conn) {
 	defer conn.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -97,7 +97,7 @@ func HandleClient(app *App, conn *protocol.Conn) {
 		fmt.Printf("failed to read hello packet: %v\n", err)
 		return
 	}
-	hello, err := protocol.DeserializeClientHello(helloData)
+	hello, err := shared.DeserializeClientHello(helloData)
 	if err != nil {
 		fmt.Printf("failed to read hello packet: %v\n", err)
 		return
@@ -117,16 +117,16 @@ func HandleClient(app *App, conn *protocol.Conn) {
 	fmt.Printf("Client %s joined session %032x\n", string(hello.PlayerName[:]), sessionInfo.ID)
 
 	/* Subscribe to WAL */
-	stream := session.wal.Subscribe(hello.WalIndex, func(index uint32, entry *protocol.WalEntry) {
+	stream := session.wal.Subscribe(hello.WalIndex, func(index uint32, entry *shared.WalEntry) {
 		/* Reply with the WAL entry */
 		/* TODO: Centralize this somewhere */
-		data, err := protocol.SerializeWalEntry(entry)
+		data, err := shared.SerializeWalEntry(entry)
 		if err != nil {
 			fmt.Printf("Failed to serialize WAL entry: %v\n", err)
 			return
 		}
 		buf := make([]byte, 1+4+len(data))
-		buf[0] = protocol.NetOpWal
+		buf[0] = shared.NetOpWal
 		binary.LittleEndian.PutUint32(buf[1:5], index)
 		copy(buf[5:], data)
 

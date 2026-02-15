@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/OoTMM/multiplayer/protocol"
+	"github.com/OoTMM/multiplayer/shared"
 )
 
 type App struct {
 	config   *Config
-	listener *protocol.ConnListener
+	listener *shared.ConnListener
 
 	clients      map[*Client]bool
 	clientsMutex sync.RWMutex
@@ -72,7 +72,7 @@ func (app *App) RemoveClient(client *Client) {
 
 func (app *App) Run() {
 	bindAddr := fmt.Sprintf("%s:%d", app.config.BindAddress, app.config.BindPort)
-	listener, err := protocol.ListenProtocol(bindAddr)
+	listener, err := shared.ListenProtocol(bindAddr)
 	if err != nil {
 		fmt.Printf("failed to bind to address %s: %v\n", bindAddr, err)
 		return

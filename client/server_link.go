@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OoTMM/multiplayer/protocol"
+	"github.com/OoTMM/multiplayer/shared"
 )
 
 type ServerLink struct {
 	address     string
 	sessionInfo *SessionInfo
-	wal         *protocol.WAL
+	wal         *shared.WAL
 
 	conn net.Conn
 	mu   sync.RWMutex
@@ -36,7 +36,7 @@ func drainChannel(ch chan []byte) {
 	}
 }
 
-func CreateServerLink(address string, sessionInfo *SessionInfo, wal *protocol.WAL) *ServerLink {
+func CreateServerLink(address string, sessionInfo *SessionInfo, wal *shared.WAL) *ServerLink {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	sl := &ServerLink{
@@ -67,7 +67,7 @@ func (sl *ServerLink) connect() (net.Conn, error) {
 	}
 
 	/* Send a HELLO packet to the server */
-	hello := protocol.ClientHello{
+	hello := shared.ClientHello{
 		SessionID:     sl.sessionInfo.SessionID,
 		SessionSecret: sl.sessionInfo.SessionSecret,
 		PlayerID:      sl.sessionInfo.PlayerID,
@@ -75,7 +75,7 @@ func (sl *ServerLink) connect() (net.Conn, error) {
 		WorldID:       sl.sessionInfo.WorldID,
 		WalIndex:      sl.wal.Count(),
 	}
-	err = protocol.NetPacketSend(conn, protocol.SerializeClientHello(&hello))
+	err = shared.NetPacketSend(conn, shared.SerializeClientHello(&hello))
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to send hello packet: %v", err)
@@ -91,7 +91,7 @@ func (sl *ServerLink) readLoop(conn net.Conn, ctx context.Context, cancel contex
 	defer conn.Close()
 
 	for {
-		data, err := protocol.NetPacketRecv(conn)
+		data, err := shared.NetPacketRecv(conn)
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -116,7 +116,7 @@ func (sl *ServerLink) writeLoop(conn net.Conn, ctx context.Context, cancel conte
 	for {
 		select {
 		case data := <-sl.packetsOut:
-			err := protocol.NetPacketSend(conn, data)
+			err := shared.NetPacketSend(conn, data)
 			if err != nil {
 				select {
 				case <-ctx.Done():

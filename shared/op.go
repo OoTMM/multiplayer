@@ -1,4 +1,4 @@
-package protocol
+package shared
 
 const (
 	Version = 0x00000001

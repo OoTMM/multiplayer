@@ -6,20 +6,20 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/OoTMM/multiplayer/protocol"
+	"github.com/OoTMM/multiplayer/shared"
 )
 
 const GAME_OP_WRITE_WAL_ITEM = 0x01
 const GAME_OP_EXCHANGE_POS = 0x02
 
-func gameReadWalItem(session *Session, data []byte) (*protocol.WalEntry, error) {
+func gameReadWalItem(session *Session, data []byte) (*shared.WalEntry, error) {
 	if len(data) < 10 {
 		return nil, fmt.Errorf("Invalid WAL item data length: %d bytes", len(data))
 	}
 
-	walItem := &protocol.WalItem{}
-	walEntry := &protocol.WalEntry{
-		Type: protocol.WalTypeItem,
+	walItem := &shared.WalItem{}
+	walEntry := &shared.WalEntry{
+		Type: shared.WalTypeItem,
 		Item: walItem,
 	}
 	walItem.PlayerID = session.info.PlayerID
@@ -62,7 +62,7 @@ func gamePacketWriteWalItem(session *Session, data []byte) error {
 	fmt.Printf(" * ItemID:             %d\n", walEntry.Item.ItemID)
 
 	/* Serialize */
-	data, err = protocol.SerializeWalEntry(walEntry)
+	data, err = shared.SerializeWalEntry(walEntry)
 	if err != nil {
 		return fmt.Errorf("Failed to serialize WAL entry: %v", err)
 	}
@@ -80,7 +80,7 @@ func gamePacketWriteWalItem(session *Session, data []byte) error {
 	}
 
 	/* Optimistic send (not a fatal error) */
-	session.server.WritePacket(protocol.SerializeMessage(protocol.NetOpWal, data))
+	session.server.WritePacket(shared.SerializeMessage(shared.NetOpWal, data))
 
 	return nil
 }

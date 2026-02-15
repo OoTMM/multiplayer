@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/OoTMM/multiplayer/protocol"
+	"github.com/OoTMM/multiplayer/shared"
 )
 
 func SessionPath(sessionID [16]byte) string {
@@ -55,8 +55,8 @@ type Session struct {
 	initChan chan struct{}
 	initErr  error
 
-	wal   *protocol.WAL
-	names *protocol.PlayerNamesStore
+	wal   *shared.WAL
+	names *shared.PlayerNamesStore
 }
 
 func NewSession(app *App, info SessionInfo, firstClient *Client) (*Session, error) {
@@ -69,19 +69,19 @@ func NewSession(app *App, info SessionInfo, firstClient *Client) (*Session, erro
 		return nil, fmt.Errorf("failed to create session directory: %v", err)
 	}
 
-	wal, err := protocol.OpenWAL(path + "/wal.bin")
+	wal, err := shared.OpenWAL(path + "/wal.bin")
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to open WAL: %v", err)
 	}
 
-	names, err := protocol.OpenPlayerNamesStore(path + "/names.bin")
+	names, err := shared.OpenPlayerNamesStore(path + "/names.bin")
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to open player names store: %v", err)
 	}
 
-	names.Add(&protocol.PlayerName{
+	names.Add(&shared.PlayerName{
 		ID:   firstClient.ID,
 		Name: firstClient.Name,
 	})
@@ -134,7 +134,7 @@ func (s *Session) AddClient(client *Client) {
 	s.clients[client] = true
 	s.clientsCount++
 
-	s.names.Add(&protocol.PlayerName{
+	s.names.Add(&shared.PlayerName{
 		ID:   client.ID,
 		Name: client.Name,
 	})
