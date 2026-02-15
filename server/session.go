@@ -55,7 +55,8 @@ type Session struct {
 	initChan chan struct{}
 	initErr  error
 
-	wal *protocol.WAL
+	wal   *protocol.WAL
+	names *protocol.PlayerNamesStore
 }
 
 func NewSession(app *App, info SessionInfo, firstClient *Client) (*Session, error) {
@@ -74,6 +75,17 @@ func NewSession(app *App, info SessionInfo, firstClient *Client) (*Session, erro
 		return nil, fmt.Errorf("failed to open WAL: %v", err)
 	}
 
+	names, err := protocol.OpenPlayerNamesStore(path + "/names.bin")
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to open player names store: %v", err)
+	}
+
+	names.Add(&protocol.PlayerName{
+		ID:   firstClient.ID,
+		Name: firstClient.Name,
+	})
+
 	session := &Session{
 		app:      app,
 		info:     info,
@@ -84,6 +96,7 @@ func NewSession(app *App, info SessionInfo, firstClient *Client) (*Session, erro
 		initChan: make(chan struct{}),
 		initErr:  nil,
 		wal:      wal,
+		names:    names,
 	}
 
 	session.clients[firstClient] = true
@@ -120,6 +133,11 @@ func (s *Session) AddClient(client *Client) {
 	defer s.clientMutex.Unlock()
 	s.clients[client] = true
 	s.clientsCount++
+
+	s.names.Add(&protocol.PlayerName{
+		ID:   client.ID,
+		Name: client.Name,
+	})
 }
 
 func (s *Session) RemoveClient(client *Client) {

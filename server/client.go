@@ -13,6 +13,9 @@ type Client struct {
 	App  *App
 	Conn *protocol.Conn
 
+	ID   [16]byte
+	Name [8]byte
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -102,6 +105,8 @@ func HandleClient(app *App, conn *protocol.Conn) {
 	sessionInfo := &SessionInfo{}
 	copy(sessionInfo.ID[:], hello.SessionID[:])
 	sessionInfo.Secret = hello.SessionSecret
+	copy(client.ID[:], hello.PlayerID[:])
+	copy(client.Name[:], hello.PlayerName[:])
 
 	session, err := app.JoinSession(client, sessionInfo)
 	if err != nil {
