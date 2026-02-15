@@ -200,6 +200,12 @@ func (sl *ServerLink) loop() {
 
 		/* Wait for the group */
 		sl.wg.Wait()
+
+		/* Wait a moment before trying to reconnect */
+		select {
+		case <-sl.ctx.Done():
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
 

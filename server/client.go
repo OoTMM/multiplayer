@@ -19,8 +19,30 @@ type Client struct {
 	session *Session
 }
 
+func (c *Client) handleRequestWal(data []byte) {
+	entry, err := protocol.DeserializeWalEntry(data)
+	if err != nil {
+		fmt.Printf("Failed to deserialize WAL entry: %v\n", err)
+		return
+	}
+	fmt.Printf("debug: Received WAL entry: %v\n", entry)
+	c.session.wal.Append(entry)
+}
+
 func (c *Client) handleRequest(packet []byte) {
 	fmt.Printf("debug: Received packet %v\n", packet)
+	if len(packet) < 1 {
+		return
+	}
+	op := packet[0]
+	remain := packet[1:]
+
+	switch op {
+	case protocol.NetOpWal:
+		c.handleRequestWal(remain)
+	default:
+		fmt.Printf("warn: Unknown packet op: %02x\n", op)
+	}
 }
 
 func (c *Client) handleRequests() {
@@ -89,6 +111,12 @@ func HandleClient(app *App, conn *protocol.Conn) {
 	}
 	client.session = session
 	fmt.Printf("Client %s joined session %032x\n", string(hello.PlayerName[:]), sessionInfo.ID)
+
+	/* Subscribe to WAL */
+	stream := session.wal.Subscribe(hello.WalIndex, func(index uint32, entry *protocol.WalEntry) {
+		fmt.Printf("debug: WAL #%d: %v\n", index, entry)
+	})
+	defer stream.Close()
 
 	client.wg.Go(client.handleRequests)
 

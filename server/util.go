@@ -12,10 +12,10 @@ func dataPathPrefix() string {
 	}
 
 	if runtime.GOOS == "windows" {
-		return os.Getenv("APPDATA") + "/OoTMM-Server"
+		return os.Getenv("APPDATA") + "/OoTMM/Server"
 	}
 
-	return os.Getenv("HOME") + "/.local/share/ootmm-server"
+	return os.Getenv("HOME") + "/.local/share/ootmm/server"
 }
 
 func DataPath(suffix string) string {

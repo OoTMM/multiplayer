@@ -27,8 +27,12 @@ func NewApp(config *Config) *App {
 }
 
 func (app *App) JoinSession(client *Client, info *SessionInfo) (*Session, error) {
+	var err error
+	var storedInfo *SessionInfo
+
 	app.sessionsMutex.Lock()
 	defer app.sessionsMutex.Unlock()
+
 	session := app.sessions[info.ID]
 	if session != nil {
 		existingInfo := session.Info()
@@ -37,14 +41,17 @@ func (app *App) JoinSession(client *Client, info *SessionInfo) (*Session, error)
 		}
 		session.AddClient(client)
 	} else {
-		storedInfo, err := LoadSessionInfo(info.ID)
+		storedInfo, err = LoadSessionInfo(info.ID)
 		if err != nil {
 			return nil, fmt.Errorf("could not load session secret: %v", err)
 		}
 		if storedInfo != nil && storedInfo.Secret != info.Secret {
 			return nil, fmt.Errorf("invalid session secret")
 		}
-		session := NewSession(app, *info, client)
+		session, err = NewSession(app, *info, client)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create session: %v", err)
+		}
 		app.sessions[info.ID] = session
 	}
 

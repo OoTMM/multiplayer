@@ -40,15 +40,16 @@ func (wal *WAL) load() error {
 			return fmt.Errorf("wal: failed to read entry length: %v", err)
 		}
 
-		data := make([]byte, length)
 		length = binary.LittleEndian.Uint32(lengthBuf[:])
+		data := make([]byte, length)
+
 		_, err = io.ReadFull(wal.file, data)
 		if err != nil {
 			return fmt.Errorf("wal: failed to read entry data: %v", err)
 		}
 
 		entry, err := DeserializeWalEntry(data)
-		if entry == nil {
+		if err != nil {
 			return fmt.Errorf("wal: failed to deserialize entry")
 		}
 
@@ -94,7 +95,10 @@ func (wal *WAL) Append(entry *WalEntry) error {
 	if err != nil {
 		return fmt.Errorf("wal: failed to marshal entry: %v", err)
 	}
-	data = append(data, '\n')
+
+	/* Prepare length-prefixed format: [4 bytes length][data] */
+	lengthBuf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lengthBuf, uint32(len(data)))
 
 	/* Now we actually need to lock */
 	wal.mu.Lock()
@@ -111,6 +115,15 @@ func (wal *WAL) Append(entry *WalEntry) error {
 		return fmt.Errorf("wal: failed to seek in file: %v", err)
 	}
 
+	/* Write length prefix */
+	_, err = wal.file.Write(lengthBuf)
+	if err != nil {
+		wal.file.Truncate(pos)
+		wal.file.Seek(pos, io.SeekStart)
+		return fmt.Errorf("wal: failed to write entry length to file: %v", err)
+	}
+
+	/* Write entry data */
 	_, err = wal.file.Write(data)
 	if err != nil {
 		wal.file.Truncate(pos)

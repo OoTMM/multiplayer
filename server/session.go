@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/OoTMM/multiplayer/protocol"
 )
 
 func SessionPath(sessionID [16]byte) string {
@@ -52,10 +54,26 @@ type Session struct {
 
 	initChan chan struct{}
 	initErr  error
+
+	wal *protocol.WAL
 }
 
-func NewSession(app *App, info SessionInfo, firstClient *Client) *Session {
+func NewSession(app *App, info SessionInfo, firstClient *Client) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	path := SessionPath(info.ID)
+	err := os.MkdirAll(path, 0755)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create session directory: %v", err)
+	}
+
+	wal, err := protocol.OpenWAL(path + "/wal.bin")
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to open WAL: %v", err)
+	}
+
 	session := &Session{
 		app:      app,
 		info:     info,
@@ -65,6 +83,7 @@ func NewSession(app *App, info SessionInfo, firstClient *Client) *Session {
 		done:     make(chan struct{}),
 		initChan: make(chan struct{}),
 		initErr:  nil,
+		wal:      wal,
 	}
 
 	session.clients[firstClient] = true
@@ -72,7 +91,7 @@ func NewSession(app *App, info SessionInfo, firstClient *Client) *Session {
 
 	go session.run()
 
-	return session
+	return session, nil
 }
 
 func (s *Session) Info() SessionInfo {
