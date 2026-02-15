@@ -14,6 +14,7 @@ func ParseConfig() *Config {
 
 	pflag.StringVarP(&config.BindAddress, "bind", "b", "", "Address to bind to (default: all interfaces)")
 	pflag.Uint16VarP(&config.BindPort, "port", "p", 12500, "Port to bind to")
+	pflag.Parse()
 
 	return config
 }
