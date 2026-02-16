@@ -75,10 +75,7 @@ func OpenPlayerNamesStore(path string) (*PlayerNamesStore, error) {
 	return store, nil
 }
 
-func (store *PlayerNamesStore) Serialize() []byte {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
+func (store *PlayerNamesStore) serializeNoLock() []byte {
 	names := make([]PlayerName, 0, len(store.data))
 	for _, entry := range store.data {
 		names = append(names, *entry)
@@ -86,13 +83,21 @@ func (store *PlayerNamesStore) Serialize() []byte {
 	return SerializePlayerNames(names)
 }
 
+func (store *PlayerNamesStore) Serialize() []byte {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.serializeNoLock()
+}
+
 func (store *PlayerNamesStore) Add(entry *PlayerName) {
 	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	/* Update */
 	store.data[entry.ID] = entry
-	store.mu.Unlock()
 
 	/* Persist to disk */
-	serialized := store.Serialize()
+	serialized := store.serializeNoLock()
 	err := os.WriteFile(store.path, serialized, 0644)
 	if err != nil {
 		fmt.Printf("warn: failed to write names file: %v\n", err)

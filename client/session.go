@@ -48,7 +48,7 @@ func SessionPath(sessionID [16]byte) string {
 	return DataPath(str)
 }
 
-func sessionHandshake(conn IPCConn) (*SessionInfo, error) {
+func handshake(conn IPCConn) (*SessionInfo, error) {
 	/* Handle initial packet */
 	pkt, err := conn.ReadRaw()
 	if err != nil {
@@ -82,63 +82,6 @@ func sessionHandshake(conn IPCConn) (*SessionInfo, error) {
 	}
 
 	return info, nil
-}
-
-func StartSession(conn net.Conn, config *Config, ctx context.Context) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	ipc := NewIPCConn(conn)
-	defer ipc.Close()
-
-	info, err := sessionHandshake(*ipc)
-	if err != nil {
-		fmt.Printf("Failed to perform handshake: %v\n", err)
-		return
-	}
-
-	path := SessionPath(info.SessionID)
-	err = os.MkdirAll(path, 0700)
-	if err != nil {
-		fmt.Printf("Failed to create session directory: %v\n", err)
-		return
-	}
-
-	wal, err := shared.OpenWAL(path + "/wal.bin")
-	if err != nil {
-		fmt.Printf("Failed to open WAL: %v\n", err)
-		return
-	}
-	defer wal.Close()
-
-	/* Create the server link */
-	server := CreateServerLink(config.ServerAddress, info, wal)
-	defer server.Close()
-
-	/* Create the send queue */
-	queuePath := fmt.Sprintf("%s/queue.%d.bin", path, info.WorldID)
-	sendQueue, err := OpenSendQueue(queuePath)
-	if err != nil {
-		fmt.Printf("Failed to open send queue: %v\n", err)
-		return
-	}
-	defer sendQueue.Close()
-
-	session := &Session{
-		conn:      ipc,
-		config:    config,
-		ctx:       ctx,
-		wal:       wal,
-		server:    server,
-		sendQueue: sendQueue,
-		cancel:    cancel,
-		info:      info,
-		Pos: GamePos{
-			Key: 0xffff,
-		},
-	}
-
-	session.Run()
 }
 
 func (s *Session) ipcLoop() {
@@ -218,7 +161,7 @@ func (s *Session) handleNetPacket(packet []byte) error {
 	}
 }
 
-func (s *Session) serverLoop() {
+func serverLoop() {
 	defer s.cancel()
 
 	for {
@@ -235,35 +178,71 @@ func (s *Session) serverLoop() {
 	}
 }
 
-func (s *Session) loop() {
-	var wg sync.WaitGroup
-	wg.Go(s.ipcLoop)
-	wg.Go(s.sendQueueLoop)
-	wg.Go(s.serverLoop)
-	wg.Wait()
-}
-
-func (s *Session) Run() {
-	go func() {
-		<-s.ctx.Done()
-		s.conn.Close()
-		s.server.Close()
-	}()
-
-	fmt.Println("\nClient connected!")
-	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(s.info.NameData[:], "\x00")))
-	fmt.Printf(" * SessionID:      %032x\n", s.info.SessionID)
-	fmt.Printf(" * SessionSecret:  %08x\n", s.info.SessionSecret)
-	fmt.Printf(" * PlayerID:	   %032x\n", s.info.PlayerID)
-	fmt.Printf(" * WorldID:        %d\n", s.info.WorldID)
-
-	s.loop()
-
-	fmt.Println("Terminating client")
-}
-
 func (s *Session) Shutdown() {
 	s.cancel()
 	s.server.Close()
 	s.conn.Close()
+}
+
+func RunSession(conn net.Conn, config *Config, ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	/* Create IPC */
+	ipc := NewIPCConn(conn)
+	defer ipc.Close()
+
+	/* Handshake to get session info */
+	info, err := handshake(*ipc)
+	if err != nil {
+		return err
+	}
+
+	/* Get and prepare session directory */
+	path := SessionPath(info.SessionID)
+	err = os.MkdirAll(path, 0700)
+	if err != nil {
+		return err
+	}
+
+	/* Open WAL */
+	wal, err := shared.OpenWAL(path + "/wal.bin")
+	if err != nil {
+		return err
+	}
+	defer wal.Close()
+
+	/* Create the server link */
+	server := CreateServerLink(config.ServerAddress, info, wal)
+	defer server.Close()
+
+	/* Create the send queue */
+	queuePath := fmt.Sprintf("%s/queue.%d.bin", path, info.WorldID)
+	sendQueue, err := OpenSendQueue(queuePath)
+	if err != nil {
+		return err
+	}
+	defer sendQueue.Close()
+
+	/* TODO: review this */
+	go func() {
+		<-ctx.Done()
+		ipc.Close()
+		server.Close()
+	}()
+
+	fmt.Println("\nClient connected!")
+	fmt.Printf(" * Name:           %s\n", string(bytes.Trim(info.NameData[:], "\x00")))
+	fmt.Printf(" * SessionID:      %032x\n", info.SessionID)
+	fmt.Printf(" * SessionSecret:  %08x\n", info.SessionSecret)
+	fmt.Printf(" * PlayerID:	   %032x\n", info.PlayerID)
+	fmt.Printf(" * WorldID:        %d\n", info.WorldID)
+
+	var wg sync.WaitGroup
+	wg.Go(ipcLoop)
+	wg.Go(sendQueueLoop)
+	wg.Go(serverLoop)
+	wg.Wait()
+
+	fmt.Println("Terminating client")
 }
