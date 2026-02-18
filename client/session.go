@@ -161,7 +161,7 @@ func (s *Session) handleNetPacket(packet []byte) error {
 	}
 }
 
-func serverLoop() {
+func (s *Session) serverLoop() {
 	defer s.cancel()
 
 	for {
@@ -224,6 +224,17 @@ func RunSession(conn net.Conn, config *Config, ctx context.Context) error {
 	}
 	defer sendQueue.Close()
 
+	session := &Session{
+		config:    config,
+		conn:      ipc,
+		wal:       wal,
+		server:    server,
+		sendQueue: sendQueue,
+		ctx:       ctx,
+		cancel:    cancel,
+		info:      info,
+	}
+
 	/* TODO: review this */
 	go func() {
 		<-ctx.Done()
@@ -239,10 +250,12 @@ func RunSession(conn net.Conn, config *Config, ctx context.Context) error {
 	fmt.Printf(" * WorldID:        %d\n", info.WorldID)
 
 	var wg sync.WaitGroup
-	wg.Go(ipcLoop)
-	wg.Go(sendQueueLoop)
-	wg.Go(serverLoop)
+	wg.Go(session.ipcLoop)
+	wg.Go(session.sendQueueLoop)
+	wg.Go(session.serverLoop)
 	wg.Wait()
 
 	fmt.Println("Terminating client")
+
+	return nil
 }
