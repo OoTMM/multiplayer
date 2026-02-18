@@ -35,6 +35,7 @@ type Session struct {
 	wal       *shared.WAL
 	server    *ServerLink
 	sendQueue *SendQueue
+	names     *shared.PlayerNamesStore
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -116,51 +117,6 @@ func (s *Session) sendQueueLoop() {
 	}
 }
 
-func (s *Session) handleNetPacketWal(packet []byte) error {
-	index := binary.LittleEndian.Uint32(packet[0:4])
-	data := packet[4:]
-
-	entry, err := shared.DeserializeWalEntry(data)
-	if err != nil {
-		return fmt.Errorf("Failed to deserialize WAL entry: %v", err)
-	}
-
-	walCount := s.wal.Count()
-	if index != walCount {
-		return fmt.Errorf("WAL index mismatch: expected %d, got %d", walCount, index)
-	}
-
-	err = s.wal.Append(entry)
-	if err != nil {
-		return err
-	}
-
-	s.sendQueue.Ack(entry.ID)
-
-	fmt.Printf("Received WAL #%d: %032x\n", index, entry.ID)
-
-	return nil
-}
-
-func (s *Session) handleNetPacket(packet []byte) error {
-	if len(packet) < 1 {
-		return nil
-	}
-
-	fmt.Printf("debug: Packet %v\n", packet)
-
-	op := packet[0]
-	remain := packet[1:]
-
-	switch op {
-	case shared.NetOpWal:
-		return s.handleNetPacketWal(remain)
-	default:
-		fmt.Printf("warn: Unknown packet op: %02x\n", op)
-		return nil
-	}
-}
-
 func (s *Session) serverLoop() {
 	defer s.cancel()
 
@@ -169,7 +125,7 @@ func (s *Session) serverLoop() {
 		case <-s.ctx.Done():
 			return
 		case packet := <-s.server.Packets():
-			err := s.handleNetPacket(packet)
+			err := HandleNetPacket(s, packet)
 			if err != nil {
 				fmt.Printf("Error handling server packet: %v\n", err)
 				return
@@ -224,12 +180,19 @@ func RunSession(conn net.Conn, config *Config, ctx context.Context) error {
 	}
 	defer sendQueue.Close()
 
+	/* Create the names store */
+	names, err := shared.OpenPlayerNamesStore(path + "/names.bin")
+	if err != nil {
+		return err
+	}
+
 	session := &Session{
 		config:    config,
 		conn:      ipc,
 		wal:       wal,
 		server:    server,
 		sendQueue: sendQueue,
+		names:     names,
 		ctx:       ctx,
 		cancel:    cancel,
 		info:      info,

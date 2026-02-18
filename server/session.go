@@ -102,6 +102,7 @@ func NewSession(app *App, info SessionInfo, firstClient *Client) (*Session, erro
 	session.clients[firstClient] = true
 	session.clientsCount = 1
 
+	session.OnNewClient(firstClient)
 	go session.run()
 
 	return session, nil
@@ -129,15 +130,32 @@ func (s *Session) run() {
 }
 
 func (s *Session) AddClient(client *Client) {
-	s.clientMutex.Lock()
-	defer s.clientMutex.Unlock()
-	s.clients[client] = true
-	s.clientsCount++
-
-	s.names.Add(&shared.PlayerName{
+	/* Register name */
+	isNameNew := s.names.Add(&shared.PlayerName{
 		ID:   client.ID,
 		Name: client.Name,
 	})
+
+	if isNameNew {
+		newName := shared.PlayerName{
+			ID:   client.ID,
+			Name: client.Name,
+		}
+		s.BroadcastOp(shared.NetOpPlayerNames, shared.SerializePlayerNames([]shared.PlayerName{newName}))
+	}
+
+	s.clientMutex.Lock()
+	s.clients[client] = true
+	s.clientsCount++
+	s.clientMutex.Unlock()
+
+	/* Notify the client of the current session state */
+	s.OnNewClient(client)
+}
+
+func (s *Session) OnNewClient(client *Client) {
+	/* Send current player names */
+	s.BroadcastOp(shared.NetOpPlayerNames, s.names.Serialize())
 }
 
 func (s *Session) RemoveClient(client *Client) {
@@ -150,4 +168,18 @@ func (s *Session) RemoveClient(client *Client) {
 func (s *Session) WaitReady() error {
 	<-s.initChan
 	return s.initErr
+}
+
+func (s *Session) Broadcast(packet []byte) {
+	s.clientMutex.RLock()
+	defer s.clientMutex.RUnlock()
+
+	for client := range s.clients {
+		client.Conn.WritePacket(packet)
+	}
+}
+
+func (s *Session) BroadcastOp(op uint8, payload []byte) {
+	packet := shared.SerializeMessage(op, payload)
+	s.Broadcast(packet)
 }

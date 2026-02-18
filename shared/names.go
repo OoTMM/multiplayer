@@ -89,9 +89,15 @@ func (store *PlayerNamesStore) Serialize() []byte {
 	return store.serializeNoLock()
 }
 
-func (store *PlayerNamesStore) Add(entry *PlayerName) {
+func (store *PlayerNamesStore) Add(entry *PlayerName) bool {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+
+	/* Check for existing entry */
+	existing, exists := store.data[entry.ID]
+	if exists && existing.Name == entry.Name {
+		return false
+	}
 
 	/* Update */
 	store.data[entry.ID] = entry
@@ -102,6 +108,8 @@ func (store *PlayerNamesStore) Add(entry *PlayerName) {
 	if err != nil {
 		fmt.Printf("warn: failed to write names file: %v\n", err)
 	}
+
+	return true
 }
 
 func (store *PlayerNamesStore) Get(id [16]byte) *PlayerName {

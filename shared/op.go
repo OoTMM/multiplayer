@@ -4,10 +4,10 @@ const (
 	Version = 0x00000001
 	Magic   = "OoTMM2\x00\xfe"
 
-	NetOpNop        = 0x00
-	NetOpHello      = 0x01
-	NetOpWal        = 0x02
-	NetOpPlayerName = 0x03
+	NetOpNop         = 0x00
+	NetOpHello       = 0x01
+	NetOpWal         = 0x02
+	NetOpPlayerNames = 0x03
 )
 
 func SerializeMessage(op uint8, payload []byte) []byte {

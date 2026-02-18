@@ -26,6 +26,8 @@ func RunServer(config *Config, ctx context.Context) {
 	}
 	defer listener.Close()
 
+	fmt.Printf("Listening on %s\n", listener.Addr())
+
 	go func() {
 		<-ctx.Done()
 		listener.Close()
