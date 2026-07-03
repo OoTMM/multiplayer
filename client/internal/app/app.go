@@ -3,13 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"sync"
 
-	"github.com/OoTMM/multiplayer/client/internal/emulators"
+	"github.com/OoTMM/multiplayer/client/internal/ipc"
 )
 
 type App struct {
-	ctx      context.Context
-	detector *emulators.Detector
+	ctx context.Context
 }
 
 func (app *App) start() {
@@ -17,17 +17,22 @@ func (app *App) start() {
 }
 
 func (app *App) stop() {
-	app.detector.Close()
 	fmt.Println("Client stopped")
 }
 
 func Run(ctx context.Context) {
+	var wg sync.WaitGroup
+
 	app := &App{
-		ctx:      ctx,
-		detector: emulators.NewDetector(ctx),
+		ctx: ctx,
 	}
 
 	app.start()
+	wg.Go(func() { ipc.ServePJ64(ctx, app.handle) })
 	<-ctx.Done()
+	wg.Wait()
 	app.stop()
+}
+
+func (app *App) handle(conn ipc.RawConn) {
 }
