@@ -1,7 +1,7 @@
 package ipc
 
-type RawConn interface {
-	Close() error
+type Conn interface {
+	Close()
 	Read() ([]byte, error)
 	Write([]byte) error
 }

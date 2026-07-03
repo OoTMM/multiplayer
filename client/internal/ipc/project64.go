@@ -3,18 +3,17 @@ package ipc
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 )
 
 type PJ64Conn struct {
-	path string
-	pipe net.Conn
+	path   string
+	handle windows.Handle
 }
 
 func listPipes() []string {
@@ -33,14 +32,27 @@ func listPipes() []string {
 	return pipes
 }
 
-func newPJ64Conn(path string, pipe net.Conn) *PJ64Conn {
-	return &PJ64Conn{
-		path: path,
-		pipe: pipe,
+func newPJ64Conn(path string) (*PJ64Conn, error) {
+	p, err := windows.UTF16FromString(path)
+	if err != nil {
+		return nil, err
 	}
+
+	h, err := windows.CreateFile(&p[0], windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	mode := uint32(windows.PIPE_READMODE_MESSAGE)
+	if err := windows.SetNamedPipeHandleState(h, &mode, nil, nil); err != nil {
+		windows.CloseHandle(h)
+		return nil, err
+	}
+
+	return &PJ64Conn{handle: h, path: path}, nil
 }
 
-func ServePJ64(ctx context.Context, cb func(conn RawConn)) error {
+func ServePJ64(ctx context.Context, cb func(conn Conn)) error {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -61,20 +73,19 @@ func ServePJ64(ctx context.Context, cb func(conn RawConn)) error {
 					continue
 				}
 				fmt.Println("Found new pipe:", pipe)
-				p, err := winio.DialPipeContext(ctx, pipe)
+				conn, err := newPJ64Conn(pipe)
 				if err != nil {
 					fmt.Println("Failed to connect to pipe:", err)
 					continue
 				}
-				c := newPJ64Conn(pipe, p)
 				active[pipe] = struct{}{}
 				wg.Go(func() {
 					fmt.Println("There is a new pipe!")
-					cb(c)
+					cb(conn)
 					<-ctx.Done()
-					c.Close()
+					conn.Close()
 					mu.Lock()
-					delete(active, c.path)
+					delete(active, conn.path)
 					mu.Unlock()
 				})
 			}
@@ -83,15 +94,29 @@ func ServePJ64(ctx context.Context, cb func(conn RawConn)) error {
 	}
 }
 
-func (conn *PJ64Conn) Close() error {
-	return conn.pipe.Close()
+func (conn *PJ64Conn) Close() {
+	windows.CloseHandle(conn.handle)
 }
 
 func (conn *PJ64Conn) Read() ([]byte, error) {
-	return nil, nil
+	buf := make([]byte, 512)
+	var msg []byte
+	for {
+		var n uint32
+		err := windows.ReadFile(conn.handle, buf, &n, nil)
+		msg = append(msg, buf[:n]...)
+		switch err {
+		case nil:
+			return msg, nil
+		case windows.ERROR_MORE_DATA:
+			continue
+		default:
+			return nil, err
+		}
+	}
 }
 
 func (conn *PJ64Conn) Write(data []byte) error {
-	_, err := conn.pipe.Write(data)
-	return err
+	var n uint32
+	return windows.WriteFile(conn.handle, data, &n, nil)
 }
