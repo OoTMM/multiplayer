@@ -95,6 +95,7 @@ func ServePJ64(ctx context.Context, cb func(conn Conn)) error {
 }
 
 func (conn *PJ64Conn) Close() {
+	windows.CancelIoEx(conn.handle, nil)
 	windows.CloseHandle(conn.handle)
 }
 

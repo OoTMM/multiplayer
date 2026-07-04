@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -37,38 +36,40 @@ func Run(ctx context.Context) {
 }
 
 func (app *App) handle(conn ipc.Conn) {
-	msg, err := conn.Read()
+	raw, err := conn.Read()
 	if err != nil {
 		fmt.Println("Failed to read from connection:", err)
 		return
 	}
 
-	fmt.Printf("Received message: %x\n", msg)
-
-	seq := binary.LittleEndian.Uint32(msg[0:4])
-	op := msg[4]
-	magic := msg[5:13]
-
-	if op != 0x01 {
-		fmt.Printf("unexpected operation code in HELLO: %d\n", op)
+	fmt.Printf("Received message: %x\n", raw)
+	msg, err := ipc.ParseMessage(raw)
+	if err != nil {
+		fmt.Println("Failed to parse message:", err)
 		return
 	}
 
-	if seq != 0 {
-		fmt.Printf("non-zero sequence number in HELLO: %d\n", seq)
+	if msg.Op != ipc.OpHello {
+		fmt.Printf("Unexpected operation code: %d\n", msg.Op)
 		return
 	}
 
-	if string(magic) != "OoTMM\x7f\x01\x00" {
-		fmt.Printf("unexpected magic in HELLO: %x\n", magic)
+	if msg.Seq != 0 {
+		fmt.Printf("Unexpected sequence number: %d\n", msg.Seq)
 		return
 	}
 
-	info := game.ReadSessionInfo(msg[13:])
-	if info == nil {
-		fmt.Println("Failed to read session info from message")
+	hello, err := ipc.ParseMessageBodyHelloIn(msg.Payload)
+	if err != nil {
+		fmt.Println("Failed to parse HELLO_IN message body:", err)
 		return
 	}
 
-	fmt.Printf("Session Info: %+v\n", info)
+	if string(hello.Magic[:]) != "OoTMM\x7f\x01\x00" {
+		fmt.Printf("Unexpected magic: %x\n", hello.Magic)
+		return
+	}
+
+	session := game.OpenSession(hello.SessionID, hello.SessionSecret)
+	session.ProcessPlayer(app.ctx, hello, conn)
 }
