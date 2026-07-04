@@ -5,3 +5,7 @@ type Conn interface {
 	Read() ([]byte, error)
 	Write([]byte) error
 }
+
+type ConnFactory interface {
+	Open() (Conn, error)
+}

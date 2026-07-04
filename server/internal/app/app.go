@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	"github.com/OoTMM/multiplayer/shared/protocol"
 )
 
 type App struct {
@@ -29,6 +31,27 @@ func Run(ctx context.Context) error {
 
 func (app *App) handleClient(conn *net.TCPConn) {
 	defer conn.Close()
+
+	pkt, err := protocol.RecvRaw(conn)
+	if err != nil {
+		if app.ctx.Err() == nil {
+			fmt.Println("Failed to receive packet:", err)
+		}
+		return
+	}
+
+	if pkt.Op != protocol.OpHello {
+		fmt.Printf("Unexpected operation code: %d\n", pkt.Op)
+		return
+	}
+
+	hello, err := protocol.ParseClientHello(pkt.Data)
+	if err != nil {
+		fmt.Println("Failed to parse hello packet:", err)
+		return
+	}
+
+	fmt.Printf("Received hello from player %s (ID: %d, World: %d)\n", hello.PlayerName, hello.PlayerID, hello.WorldID)
 }
 
 func (app *App) run() {

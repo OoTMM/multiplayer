@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"sync"
+	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/game"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
@@ -13,63 +13,87 @@ type App struct {
 	ctx context.Context
 }
 
-func (app *App) start() {
-	fmt.Println("Client started")
-}
-
-func (app *App) stop() {
-	fmt.Println("Client stopped")
-}
-
 func Run(ctx context.Context) {
-	var wg sync.WaitGroup
-
 	app := &App{
 		ctx: ctx,
 	}
 
-	app.start()
-	wg.Go(func() { ipc.ServePJ64(ctx, app.handle) })
-	<-ctx.Done()
-	wg.Wait()
-	app.stop()
+	app.loop()
 }
 
-func (app *App) handle(conn ipc.Conn) {
+func (app *App) hello(conn ipc.Conn) *ipc.MessageBodyHelloIn {
 	raw, err := conn.Read()
 	if err != nil {
 		fmt.Println("Failed to read from connection:", err)
-		return
+		return nil
 	}
 
 	fmt.Printf("Received message: %x\n", raw)
 	msg, err := ipc.ParseMessage(raw)
 	if err != nil {
 		fmt.Println("Failed to parse message:", err)
-		return
+		return nil
 	}
 
 	if msg.Op != ipc.OpHello {
 		fmt.Printf("Unexpected operation code: %d\n", msg.Op)
-		return
+		return nil
 	}
 
 	if msg.Seq != 0 {
 		fmt.Printf("Unexpected sequence number: %d\n", msg.Seq)
-		return
+		return nil
 	}
 
 	hello, err := ipc.ParseMessageBodyHelloIn(msg.Payload)
 	if err != nil {
 		fmt.Println("Failed to parse HELLO_IN message body:", err)
-		return
+		return nil
 	}
 
 	if string(hello.Magic[:]) != "OoTMM\x7f\x01\x00" {
 		fmt.Printf("Unexpected magic: %x\n", hello.Magic)
-		return
+		return nil
 	}
 
-	session := game.OpenSession(hello.SessionID, hello.SessionSecret)
-	session.ProcessPlayer(app.ctx, hello, conn)
+	return hello
+}
+
+func (app *App) poll() (ipc.Conn, *ipc.MessageBodyHelloIn) {
+	/* Do one pass of polling */
+	factories := ipc.PollProject64(app.ctx)
+	for _, factory := range factories {
+		conn, err := factory.Open()
+		if err != nil {
+			fmt.Println("Failed to open connection:", err)
+			continue
+		}
+		hello := app.hello(conn)
+		if hello != nil {
+			return conn, hello
+		}
+		conn.Close()
+	}
+
+	return nil, nil
+}
+
+func (app *App) loop() {
+	fmt.Println("Client started")
+	for {
+		if app.ctx.Err() != nil {
+			break
+		}
+		conn, hello := app.poll()
+		if conn != nil && hello != nil {
+			game.Run(app.ctx, conn, hello)
+		} else {
+			select {
+			case <-app.ctx.Done():
+				break
+			case <-time.After(time.Second):
+			}
+		}
+	}
+	fmt.Println("Client stopped")
 }

@@ -16,6 +16,10 @@ type PJ64Conn struct {
 	handle windows.Handle
 }
 
+type PJ64ConnFactory struct {
+	path string
+}
+
 func listPipes() []string {
 	pipes := make([]string, 0)
 	entries, err := os.ReadDir(`\\.\pipe\`)
@@ -50,6 +54,15 @@ func newPJ64Conn(path string) (*PJ64Conn, error) {
 	}
 
 	return &PJ64Conn{handle: h, path: path}, nil
+}
+
+func PollProject64(ctx context.Context) []ConnFactory {
+	pipes := listPipes()
+	factories := make([]ConnFactory, 0, len(pipes))
+	for _, pipe := range pipes {
+		factories = append(factories, &PJ64ConnFactory{path: pipe})
+	}
+	return factories
 }
 
 func ServePJ64(ctx context.Context, cb func(conn Conn)) error {
@@ -120,4 +133,12 @@ func (conn *PJ64Conn) Read() ([]byte, error) {
 func (conn *PJ64Conn) Write(data []byte) error {
 	var n uint32
 	return windows.WriteFile(conn.handle, data, &n, nil)
+}
+
+func (f *PJ64ConnFactory) Open() (Conn, error) {
+	conn, err := newPJ64Conn(f.path)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
 }

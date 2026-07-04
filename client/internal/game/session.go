@@ -6,47 +6,117 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 )
 
 type Session struct {
+	Conn          ipc.Conn
 	SessionID     [16]byte
 	SessionSecret [8]byte
-	Players       map[*SessionPlayer]struct{}
-	muPlayers     sync.Mutex
+	PlayerID      [16]byte
+	PlayerName    [8]byte
+	WorldID       uint8
+	WalIndex      uint32
+	SeqGame       uint32
+	SeqNet        uint32
+	msgIn         chan *ipc.Message
+	msgOut        chan []byte
+	ctx           context.Context
+	cancel        context.CancelFunc
+	uplink        *Uplink
+	muHello       sync.Mutex
 }
 
-type SessionPlayer struct {
-	Session    *Session
-	PlayerID   [16]byte
-	PlayerName [8]byte
-	WorldID    uint8
-	WalIndex   uint32
-	Conn       ipc.Conn
-	SeqGame    uint32
-	SeqNet     uint32
-	msgIn      chan *ipc.Message
-	msgOut     chan []byte
-	ctx        context.Context
-	cancel     context.CancelFunc
-}
+func (s *Session) handleUplink() {
+	var hello UplinkHello
+	hello.SessionID = s.SessionID
+	hello.SessionSecret = s.SessionSecret
+	hello.PlayerID = s.PlayerID
+	hello.WorldID = s.WorldID
 
-func OpenSession(sessionID [16]byte, sessionSecret [8]byte) *Session {
-	return &Session{
-		SessionID:     sessionID,
-		SessionSecret: sessionSecret,
-		Players:       make(map[*SessionPlayer]struct{}),
+	defer s.cancel()
+	for s.ctx.Err() == nil {
+		/* Capture HELLO state */
+		s.muHello.Lock()
+		hello.PlayerName = s.PlayerName
+		hello.WalIndex = s.WalIndex
+		s.muHello.Unlock()
+
+		/* Process uplink */
+		err := s.uplink.Run(&hello)
+		if err != nil {
+			fmt.Println("uplink error:", err)
+			select {
+			case <-time.After(5 * time.Second):
+			case <-s.ctx.Done():
+			}
+		}
 	}
 }
 
-func (p *SessionPlayer) handleMsgIn() {
-	defer p.cancel()
+func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	/* Generate random sequence numbers */
+	randBytes := make([]byte, 8)
+	rand.Read(randBytes)
+
+	seqGame := binary.LittleEndian.Uint32(randBytes[0:4])
+	seqNet := binary.LittleEndian.Uint32(randBytes[4:8])
+
+	session := &Session{
+		Conn:          conn,
+		SessionID:     hello.SessionID,
+		SessionSecret: hello.SessionSecret,
+		PlayerID:      hello.PlayerID,
+		PlayerName:    hello.PlayerName,
+		WorldID:       hello.WorldID,
+		WalIndex:      hello.WalIndex,
+		SeqGame:       seqGame,
+		SeqNet:        seqNet,
+		msgIn:         make(chan *ipc.Message, 16),
+		msgOut:        make(chan []byte, 16),
+		ctx:           ctx,
+		cancel:        cancel,
+		uplink:        CreateUplink(ctx, "localhost:14236"),
+	}
+
+	/* Queue the HELLO OUT message */
+	helloOutBody := ipc.MessageBodyHelloOut{
+		Magic:   [8]byte{'O', 'o', 'T', 'M', 'M', 0x7f, 0x01, 0x00},
+		SeqGame: seqGame,
+		SeqNet:  seqNet,
+	}
+	helloOut := ipc.Message{
+		Seq:     0,
+		Op:      ipc.OpHello,
+		Payload: helloOutBody.Serialize(),
+	}
+	session.SendRaw(helloOut.Serialize())
+
+	/* Start helper I/O goroutines */
+	wg.Go(session.handleMsgIn)
+	wg.Go(session.handleMsgOut)
+	wg.Go(session.handleMsgLoop)
+	wg.Go(session.handleUplink)
+
+	/* Wait for cancellation */
+	<-session.ctx.Done()
+	session.Conn.Close()
+	wg.Wait()
+}
+
+func (s *Session) handleMsgIn() {
+	defer s.cancel()
 
 	for {
-		data, err := p.Conn.Read()
+		data, err := s.Conn.Read()
 		if err != nil {
-			if p.ctx.Err() == nil {
+			if s.ctx.Err() == nil {
 				fmt.Println("failed to read from IPC:", err)
 			}
 			return
@@ -58,38 +128,38 @@ func (p *SessionPlayer) handleMsgIn() {
 		}
 
 		select {
-		case p.msgIn <- msg:
-		case <-p.ctx.Done():
+		case s.msgIn <- msg:
+		case <-s.ctx.Done():
 			return
 		}
 	}
 }
 
-func (p *SessionPlayer) handleMsgOut() {
-	defer p.cancel()
+func (s *Session) handleMsgOut() {
+	defer s.cancel()
 
 	for {
 		select {
-		case msg := <-p.msgOut:
-			err := p.Conn.Write(msg)
+		case msg := <-s.msgOut:
+			err := s.Conn.Write(msg)
 			if err != nil {
 				fmt.Println("failed to write to IPC")
 				return
 			}
-		case <-p.ctx.Done():
+		case <-s.ctx.Done():
 			return
 		}
 	}
 }
 
-func (p *SessionPlayer) SendRaw(data []byte) {
+func (p *Session) SendRaw(data []byte) {
 	select {
 	case p.msgOut <- data:
 	case <-p.ctx.Done():
 	}
 }
 
-func (p *SessionPlayer) handleWalIn(wal *ipc.MessageBodyWalIn) error {
+func (p *Session) handleWalIn(wal *ipc.MessageBodyWalIn) error {
 	switch wal.Type {
 	case ipc.WalItem:
 		item, err := ipc.ParseWalItemIn(wal.Data)
@@ -103,7 +173,7 @@ func (p *SessionPlayer) handleWalIn(wal *ipc.MessageBodyWalIn) error {
 	return nil
 }
 
-func (p *SessionPlayer) handleMsg(msg *ipc.Message) error {
+func (p *Session) handleMsg(msg *ipc.Message) error {
 	var expectedSeq uint32
 	if msg.Op == ipc.OpHello {
 		expectedSeq = 0
@@ -128,7 +198,7 @@ func (p *SessionPlayer) handleMsg(msg *ipc.Message) error {
 			return fmt.Errorf("invalid magic in HELLO_IN message")
 		}
 
-		if helloIn.SessionID != p.Session.SessionID || helloIn.SessionSecret != p.Session.SessionSecret {
+		if helloIn.SessionID != p.SessionID || helloIn.SessionSecret != p.SessionSecret {
 			return fmt.Errorf("invalid session ID or secret in HELLO_IN message")
 		}
 
@@ -162,7 +232,7 @@ func (p *SessionPlayer) handleMsg(msg *ipc.Message) error {
 	return nil
 }
 
-func (p *SessionPlayer) handleMsgLoop() {
+func (p *Session) handleMsgLoop() {
 	defer p.cancel()
 	for {
 		select {
@@ -176,65 +246,4 @@ func (p *SessionPlayer) handleMsgLoop() {
 			return
 		}
 	}
-}
-
-func (s *Session) ProcessPlayer(ctx context.Context, hello *ipc.MessageBodyHelloIn, conn ipc.Conn) {
-	/* Create context & wg */
-	var wg sync.WaitGroup
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	/* Generate random sequence numbers */
-	randBytes := make([]byte, 8)
-	rand.Read(randBytes)
-
-	seqGame := binary.LittleEndian.Uint32(randBytes[0:4])
-	seqNet := binary.LittleEndian.Uint32(randBytes[4:8])
-
-	/* Create the player */
-	player := &SessionPlayer{
-		Session:    s,
-		PlayerID:   hello.PlayerID,
-		PlayerName: hello.PlayerName,
-		WorldID:    hello.WorldID,
-		WalIndex:   hello.WalIndex,
-		Conn:       conn,
-		SeqGame:    seqGame,
-		SeqNet:     seqNet,
-		msgIn:      make(chan *ipc.Message, 16),
-		msgOut:     make(chan []byte, 16),
-		ctx:        ctx,
-		cancel:     cancel,
-	}
-
-	/* Add the player to the session */
-	s.muPlayers.Lock()
-	s.Players[player] = struct{}{}
-	s.muPlayers.Unlock()
-
-	/* Queue the HELLO OUT message */
-	helloOutBody := ipc.MessageBodyHelloOut{
-		Magic:   [8]byte{'O', 'o', 'T', 'M', 'M', 0x7f, 0x01, 0x00},
-		SeqGame: seqGame,
-		SeqNet:  seqNet,
-	}
-	helloOut := ipc.Message{
-		Seq:     0,
-		Op:      ipc.OpHello,
-		Payload: helloOutBody.Serialize(),
-	}
-	player.SendRaw(helloOut.Serialize())
-
-	/* Start helper I/O goroutines */
-	wg.Go(player.handleMsgIn)
-	wg.Go(player.handleMsgOut)
-	wg.Go(player.handleMsgLoop)
-	<-player.ctx.Done()
-	player.Conn.Close()
-	wg.Wait()
-
-	/* Remove the player from the session */
-	s.muPlayers.Lock()
-	delete(s.Players, player)
-	s.muPlayers.Unlock()
 }
