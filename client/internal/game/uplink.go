@@ -11,122 +11,107 @@ import (
 	"github.com/OoTMM/multiplayer/shared/protocol"
 )
 
-type UplinkHello struct {
-	SessionID     [16]byte
-	SessionSecret [8]byte
-	PlayerID      [16]byte
-	PlayerName    [8]byte
-	WorldID       uint8
-	WalIndex      uint32
-}
-
 type Uplink struct {
-	ctx        context.Context
-	addr       string
-	conn       net.Conn
-	connCtx    context.Context
-	connCancel context.CancelFunc
-	in         chan *protocol.Packet
-	out        chan *protocol.Packet
-	err        error
+	session *Session
+	conn    net.Conn
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
-func CreateUplink(ctx context.Context, addr string) *Uplink {
-	return &Uplink{
-		ctx:  ctx,
-		addr: addr,
-		in:   make(chan *protocol.Packet, 16),
-		out:  make(chan *protocol.Packet, 16),
-	}
-}
-
-func (u *Uplink) pumpIn() {
-	defer u.connCancel()
-	for u.connCtx.Err() == nil {
-		pkt, err := protocol.RecvRaw(u.conn)
-		if err != nil {
-			if u.connCtx.Err() == nil {
-				u.err = err
+func (s *Session) handleUplink() {
+	for s.ctx.Err() == nil {
+		s.handleUplinkConn()
+		if s.ctx.Err() == nil {
+			fmt.Println("Uplink connection lost, retrying in 5 seconds...")
+			select {
+			case <-time.After(5 * time.Second):
+			case <-s.ctx.Done():
 			}
-			return
-		}
-		select {
-		case u.in <- pkt:
-		case <-u.connCtx.Done():
-			return
 		}
 	}
 }
 
-func (u *Uplink) pumpOut() {
-	defer u.connCancel()
+func (s *Session) handleUplinkConn() {
+	/* Create a new context for this connection */
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+
+	/* Connect */
+	conn, err := net.DialTimeout("tcp", "localhost:14236", 10*time.Second)
+	if err != nil {
+		if s.ctx.Err() == nil {
+			fmt.Println("Failed to connect to uplink:", err)
+		}
+		return
+	}
+	defer conn.Close()
+
+	/* Drain the channels */
 	for {
 		select {
-		case pkt := <-u.out:
-			err := protocol.SendRaw(u.conn, pkt)
-			if err != nil {
-				if u.connCtx.Err() == nil {
-					u.err = err
-				}
-				return
-			}
-		case <-u.connCtx.Done():
-			return
-		}
-	}
-}
-
-func (u *Uplink) Run(hello *UplinkHello) error {
-	wg := sync.WaitGroup{}
-	connCtx, connCancel := context.WithCancel(u.ctx)
-	defer connCancel()
-
-	/* Drain any existing packets */
-	for {
-		select {
-		case <-u.out:
-		case <-u.in:
+		case <-s.uplinkIn:
+		case <-s.uplinkOut:
 		default:
 			goto drain_done
 		}
 	}
 drain_done:
 
-	/* Create the socket */
-	conn, err := net.DialTimeout("tcp", u.addr, 10*time.Second)
-	if err != nil {
-		return err
+	/* Create the actual uplink */
+	uplink := &Uplink{
+		session: s,
+		conn:    conn,
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 
-	u.err = nil
-	u.conn = conn
-	u.connCtx = connCtx
-	u.connCancel = connCancel
+	/* Handshake */
+	err = uplink.handshake()
+	if err != nil {
+		if s.ctx.Err() == nil {
+			fmt.Println("Failed to handshake with uplink:", err)
+		}
+		return
+	}
 
+	/* Start helper goroutines */
+	wg := sync.WaitGroup{}
+	wg.Go(uplink.pumpIn)
+	wg.Go(uplink.pumpOut)
+	wg.Go(uplink.handlePackets)
+
+	/* Sync */
+	<-ctx.Done()
+	cancel()
+	conn.Close()
+	wg.Wait()
+}
+
+func (u *Uplink) handshake() error {
 	/* Send hello packet */
+	/* TODO: Capture session data properly */
 	helloData := &protocol.ClientHello{
 		Magic:         [8]byte{'O', 'o', 'T', 'M', 'M', 0x7f, 0x01, 0x00},
 		Version:       0x00010000,
-		SessionID:     hello.SessionID,
-		SessionSecret: hello.SessionSecret,
-		PlayerID:      hello.PlayerID,
-		PlayerName:    hello.PlayerName,
-		WorldID:       hello.WorldID,
-		WalIndex:      hello.WalIndex,
+		SessionID:     u.session.SessionID,
+		SessionSecret: u.session.SessionSecret,
+		PlayerID:      u.session.PlayerID,
+		PlayerName:    u.session.PlayerName,
+		WorldID:       u.session.WorldID,
+		WalIndex:      u.session.wal.Count(),
 	}
 
 	helloPkt := &protocol.Packet{
 		Op:   protocol.OpHello,
 		Data: helloData.Serialize(),
 	}
-	err = protocol.SendRaw(u.conn, helloPkt)
+	err := protocol.SendRaw(u.conn, helloPkt)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("Sent hello packet to server")
-
-	/* Wait for server hello packet */
+	/* Wait for server reply */
+	u.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	pkt, err := protocol.RecvRaw(u.conn)
 	if err != nil {
 		return err
@@ -145,32 +130,68 @@ drain_done:
 		return fmt.Errorf("invalid version in server hello")
 	}
 	fmt.Println("Received server hello packet")
-
-	/* Start I/O */
-	wg.Go(u.pumpIn)
-	wg.Go(u.pumpOut)
-
-	/* Wait for context cancellation */
-	<-connCtx.Done()
-	conn.Close()
-	connCancel()
-	wg.Wait()
-
-	return u.err
+	u.conn.SetReadDeadline(time.Time{})
+	return nil
 }
 
-func (u *Uplink) Send(pkt *protocol.Packet) {
-	select {
-	case u.out <- pkt:
-	case <-u.connCtx.Done():
+func (u *Uplink) pumpIn() {
+	defer u.cancel()
+	for u.ctx.Err() == nil {
+		pkt, err := protocol.RecvRaw(u.conn)
+		if err != nil {
+			if u.ctx.Err() == nil {
+				fmt.Println("Failed to receive packet from uplink:", err)
+			}
+			return
+		}
+
+		select {
+		case u.session.uplinkIn <- pkt:
+		case <-u.ctx.Done():
+			return
+		}
 	}
 }
 
-func (u *Uplink) Recv() (*protocol.Packet, error) {
+func (u *Uplink) pumpOut() {
+	defer u.cancel()
+	for u.ctx.Err() == nil {
+		select {
+		case pkt := <-u.session.uplinkOut:
+			err := protocol.SendRaw(u.conn, pkt)
+			if err != nil {
+				if u.ctx.Err() == nil {
+					fmt.Println("Failed to send packet to uplink:", err)
+				}
+				return
+			}
+		case <-u.ctx.Done():
+			return
+		}
+	}
+}
+
+func (u *Uplink) handlePackets() {
+	defer u.cancel()
+	for u.ctx.Err() == nil {
+		var pkt *protocol.Packet
+		select {
+		case pkt = <-u.session.uplinkIn:
+		case <-u.ctx.Done():
+			return
+		}
+
+		err := u.session.handleUplinkPacket(pkt)
+		if err != nil {
+			fmt.Println("failed to handle uplink packet:", err)
+			return
+		}
+	}
+}
+
+func (s *Session) SendUplink(pkt *protocol.Packet) {
 	select {
-	case pkt := <-u.in:
-		return pkt, nil
-	case <-u.connCtx.Done():
-		return nil, u.err
+	case s.uplinkOut <- pkt:
+	case <-s.ctx.Done():
 	}
 }

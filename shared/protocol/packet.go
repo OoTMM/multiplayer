@@ -3,6 +3,8 @@ package protocol
 import (
 	"encoding/binary"
 	"fmt"
+
+	"github.com/OoTMM/multiplayer/shared/wal"
 )
 
 type Packet struct {
@@ -24,6 +26,11 @@ type ClientHello struct {
 type ServerHello struct {
 	Magic   [8]byte
 	Version uint32
+}
+
+type ServerWal struct {
+	Index uint32
+	Entry *wal.WalEntry
 }
 
 func ParseClientHello(data []byte) (*ClientHello, error) {
@@ -70,4 +77,29 @@ func (hello *ServerHello) Serialize() []byte {
 	copy(data[0:8], hello.Magic[:])
 	binary.LittleEndian.PutUint32(data[8:12], hello.Version)
 	return data
+}
+
+func ParseServerWal(data []byte) (*ServerWal, error) {
+	if len(data) < 4 {
+		return nil, fmt.Errorf("server wal too short")
+	}
+	var x ServerWal
+	x.Index = binary.LittleEndian.Uint32(data[0:4])
+	entry, err := wal.Parse(data[4:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize wal entry: %v", err)
+	}
+	x.Entry = entry
+	return &x, nil
+}
+
+func (x *ServerWal) Serialize() ([]byte, error) {
+	entryData, err := x.Entry.Serialize()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize wal entry: %v", err)
+	}
+	data := make([]byte, 4+len(entryData))
+	binary.LittleEndian.PutUint32(data[0:4], x.Index)
+	copy(data[4:], entryData)
+	return data, nil
 }

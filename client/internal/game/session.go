@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/protocol"
@@ -26,39 +25,47 @@ type Session struct {
 	SeqNet        uint32
 	msgIn         chan *ipc.Message
 	msgOut        chan []byte
+	uplinkIn      chan *protocol.Packet
+	uplinkOut     chan *protocol.Packet
 	ctx           context.Context
 	cancel        context.CancelFunc
-	uplink        *Uplink
 	muHello       sync.Mutex
 	dataDir       string
 	sendQ         *SendQueue
+	wal           *wal.WAL
 }
 
-func (s *Session) handleUplink() {
-	var hello UplinkHello
-	hello.SessionID = s.SessionID
-	hello.SessionSecret = s.SessionSecret
-	hello.PlayerID = s.PlayerID
-	hello.WorldID = s.WorldID
-
-	defer s.cancel()
-	for s.ctx.Err() == nil {
-		/* Capture HELLO state */
-		s.muHello.Lock()
-		hello.PlayerName = s.PlayerName
-		hello.WalIndex = s.WalIndex
-		s.muHello.Unlock()
-
-		/* Process uplink */
-		err := s.uplink.Run(&hello)
+func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
+	switch pkt.Op {
+	case protocol.OpWal:
+		body, err := protocol.ParseServerWal(pkt.Data)
 		if err != nil {
-			fmt.Println("uplink error:", err)
-			select {
-			case <-time.After(5 * time.Second):
-			case <-s.ctx.Done():
-			}
+			return fmt.Errorf("failed to parse server WAL packet: %v", err)
 		}
+
+		/* Append to the WAL */
+		err = s.wal.Append(body.Entry)
+
+		/* Clear the send queue */
+		dedupKey, err := body.Entry.DedupKey()
+		if err != nil {
+			return fmt.Errorf("failed to compute deduplication key: %v", err)
+		}
+		s.sendQ.Ack(dedupKey)
+		fmt.Printf("Received WAL entry from uplink: %+v\n", body.Entry)
+	case protocol.OpWalAck:
+		if len(pkt.Data) != 16 {
+			return fmt.Errorf("invalid WAL ACK packet length: %d", len(pkt.Data))
+		}
+		var dedupKey [16]byte
+		copy(dedupKey[:], pkt.Data)
+		s.sendQ.Ack(dedupKey)
+		fmt.Printf("Received WAL ACK from uplink: %x\n", dedupKey)
+	default:
+		fmt.Printf("warn: unhandled uplink packet: Op=%d, Data=%x\n", pkt.Op, pkt.Data)
 	}
+
+	return nil
 }
 
 func makeDataDir(id []byte) (string, error) {
@@ -94,6 +101,14 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 			return
 		}
 	}
+	defer sendQ.Close()
+
+	wal, err := wal.OpenWAL(fmt.Sprintf("%s/wal.bin", dataDir))
+	if err != nil {
+		fmt.Println("failed to open WAL:", err)
+		return
+	}
+	defer wal.Close()
 
 	/* Generate random sequence numbers */
 	randBytes := make([]byte, 8)
@@ -116,9 +131,11 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 		msgOut:        make(chan []byte, 16),
 		ctx:           ctx,
 		cancel:        cancel,
-		uplink:        CreateUplink(ctx, "localhost:14236"),
+		uplinkIn:      make(chan *protocol.Packet, 16),
+		uplinkOut:     make(chan *protocol.Packet, 16),
 		dataDir:       dataDir,
 		sendQ:         sendQ,
+		wal:           wal,
 	}
 
 	/* Queue the HELLO OUT message */
@@ -144,6 +161,8 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 	<-session.ctx.Done()
 	session.Conn.Close()
 	wg.Wait()
+
+	fmt.Println("Session closed")
 }
 
 func (s *Session) handleMsgIn() {
@@ -212,7 +231,7 @@ func (p *Session) newWalEntry(entry *wal.WalEntry) error {
 
 	/* Send the WAL entry to the uplink (optimization: don't wait for the uplink to read from the send queue) */
 	pkt := protocol.Packet{Op: protocol.OpWal, Data: data}
-	p.uplink.Send(&pkt)
+	p.SendUplink(&pkt)
 
 	return nil
 }
