@@ -10,8 +10,6 @@ type Opcode uint8
 const (
 	OpHello Opcode = 0x01
 	OpWal   Opcode = 0x02
-
-	WalItem uint8 = 0x01
 )
 
 type Message struct {

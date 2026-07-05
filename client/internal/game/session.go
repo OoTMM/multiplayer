@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
+	"github.com/OoTMM/multiplayer/shared/wal"
 )
 
 type Session struct {
@@ -27,6 +29,8 @@ type Session struct {
 	cancel        context.CancelFunc
 	uplink        *Uplink
 	muHello       sync.Mutex
+	dataDir       string
+	sendQ         *SendQueue
 }
 
 func (s *Session) handleUplink() {
@@ -56,10 +60,39 @@ func (s *Session) handleUplink() {
 	}
 }
 
+func makeDataDir(id []byte) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	dataDir := fmt.Sprintf("%s/data/sessions/%02x/%030x", cwd, id[0:2], id[2:])
+	err = os.MkdirAll(dataDir, 0755)
+	if err != nil {
+		return "", err
+	}
+	return dataDir, nil
+}
+
 func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	dataDir, err := makeDataDir(hello.SessionID[:])
+	if err != nil {
+		fmt.Println("failed to create data directory:", err)
+		return
+	}
+
+	var sendQ *SendQueue
+	if hello.Multiplayer {
+		sendQ, err = OpenSendQueue(fmt.Sprintf("%s/send_queue.dat", dataDir))
+		if err != nil {
+			fmt.Println("failed to open send queue:", err)
+			return
+		}
+	}
 
 	/* Generate random sequence numbers */
 	randBytes := make([]byte, 8)
@@ -83,6 +116,8 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 		ctx:           ctx,
 		cancel:        cancel,
 		uplink:        CreateUplink(ctx, "localhost:14236"),
+		dataDir:       dataDir,
+		sendQ:         sendQ,
 	}
 
 	/* Queue the HELLO OUT message */
@@ -159,18 +194,50 @@ func (p *Session) SendRaw(data []byte) {
 	}
 }
 
-func (p *Session) handleWalIn(wal *ipc.MessageBodyWalIn) error {
-	switch wal.Type {
-	case ipc.WalItem:
-		item, err := ipc.ParseWalItemIn(wal.Data)
+func (p *Session) newWalEntry(entry *wal.WalEntry) error {
+	/* Append to the send queue */
+	data, err := entry.Serialize()
+	if err != nil {
+		return err
+	}
+
+	dedupKey, err := entry.DedupKey()
+	if err != nil {
+		return err
+	}
+
+	p.sendQ.Add(dedupKey, data)
+	fmt.Printf("Added WAL entry to send queue: %+v\n", entry)
+	return nil
+}
+
+func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
+	var entry wal.WalEntry
+
+	copy(entry.PlayerID[:], p.PlayerID[:])
+	copy(entry.PlayerName[:], p.PlayerName[:])
+	entry.From = p.WorldID
+
+	switch w.Type {
+	case wal.WalItem:
+		item, err := ipc.ParseWalItemIn(w.Data)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("Received WAL item from player %s: %+v\n", p.PlayerName, item)
+		entry.Type = wal.WalItem
+		entry.Item.To = item.To
+		entry.Item.Game = item.Game
+		entry.Item.GI = item.GI
+		entry.Item.Flags = item.Flags
+		entry.Item.Key = item.Key
+		entry.Item.Nonce = 0
+		/* Todo: Handle nonce */
 	default:
-		return fmt.Errorf("unhandled WAL type: %d", wal.Type)
+		return fmt.Errorf("unhandled WAL type: %d", w.Type)
 	}
-	return nil
+
+	return p.newWalEntry(&entry)
 }
 
 func (p *Session) handleMsg(msg *ipc.Message) error {

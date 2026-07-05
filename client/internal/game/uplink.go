@@ -80,6 +80,17 @@ func (u *Uplink) Run(hello *UplinkHello) error {
 	connCtx, connCancel := context.WithCancel(u.ctx)
 	defer connCancel()
 
+	/* Drain any existing packets */
+	for {
+		select {
+		case <-u.out:
+		case <-u.in:
+		default:
+			goto drain_done
+		}
+	}
+drain_done:
+
 	/* Create the socket */
 	conn, err := net.DialTimeout("tcp", u.addr, 10*time.Second)
 	if err != nil {
@@ -125,4 +136,20 @@ func (u *Uplink) Run(hello *UplinkHello) error {
 	wg.Wait()
 
 	return u.err
+}
+
+func (u *Uplink) Send(pkt *protocol.Packet) {
+	select {
+	case u.out <- pkt:
+	case <-u.connCtx.Done():
+	}
+}
+
+func (u *Uplink) Recv() (*protocol.Packet, error) {
+	select {
+	case pkt := <-u.in:
+		return pkt, nil
+	case <-u.connCtx.Done():
+		return nil, u.err
+	}
 }
