@@ -222,7 +222,7 @@ func (s *Session) Join(PlayerID [16]byte, worldID uint8, walIndex uint32, conn n
 		}).Serialize(),
 	}
 	err := protocol.SendRaw(conn, pkt)
-	fmt.Printf("Sent hello packet to player %s: %+v\n", player.ID, pkt)
+	fmt.Printf("Sent hello packet to player: %+v\n", pkt)
 
 	if err == nil {
 		wg.Go(player.handleMsgIn)

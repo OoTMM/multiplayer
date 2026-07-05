@@ -195,3 +195,14 @@ func (s *Session) SendUplink(pkt *protocol.Packet) {
 	case <-s.ctx.Done():
 	}
 }
+
+func (s *Session) TrySendUplink(pkt *protocol.Packet) {
+	if s.ctx.Err() != nil {
+		return
+	}
+
+	select {
+	case s.uplinkOut <- pkt:
+	default:
+	}
+}

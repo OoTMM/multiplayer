@@ -11,6 +11,7 @@ const (
 	OpHello    Opcode = 0x01
 	OpWal      Opcode = 0x02
 	OpWalQuery Opcode = 0x03
+	OpWalAck   Opcode = 0x04
 )
 
 type Message struct {
@@ -36,8 +37,9 @@ type MessageBodyHelloOut struct {
 }
 
 type MessageBodyWalIn struct {
-	Type uint8
-	Data []byte
+	Token uint32
+	Type  uint8
+	Data  []byte
 }
 
 type MessageBodyWalQueryIn struct {
@@ -95,12 +97,13 @@ func ParseMessageBodyHelloIn(data []byte) (*MessageBodyHelloIn, error) {
 }
 
 func ParseMessageBodyWalIn(data []byte) (*MessageBodyWalIn, error) {
-	if len(data) < 1 {
+	if len(data) < 5 {
 		return nil, fmt.Errorf("message body too short for WAL_IN")
 	}
 	var body MessageBodyWalIn
-	body.Type = data[0]
-	body.Data = data[1:]
+	body.Token = binary.BigEndian.Uint32(data[0:4])
+	body.Type = data[4]
+	body.Data = data[5:]
 	return &body, nil
 }
 

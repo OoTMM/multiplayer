@@ -24,7 +24,7 @@ type Session struct {
 	SeqGame       uint32
 	SeqNet        uint32
 	msgIn         chan *ipc.Message
-	msgOut        chan []byte
+	msgOut        chan *ipc.Message
 	uplinkIn      chan *protocol.Packet
 	uplinkOut     chan *protocol.Packet
 	ctx           context.Context
@@ -127,7 +127,7 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 		SeqGame:       seqGame,
 		SeqNet:        seqNet,
 		msgIn:         make(chan *ipc.Message, 16),
-		msgOut:        make(chan []byte, 16),
+		msgOut:        make(chan *ipc.Message, 16),
 		ctx:           ctx,
 		cancel:        cancel,
 		uplinkIn:      make(chan *protocol.Packet, 16),
@@ -148,7 +148,7 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 		Op:      ipc.OpHello,
 		Payload: helloOutBody.Serialize(),
 	}
-	session.SendRaw(helloOut.Serialize())
+	session.Conn.Write(helloOut.Serialize())
 
 	/* Start helper I/O goroutines */
 	wg.Go(session.handleMsgIn)
@@ -196,7 +196,9 @@ func (s *Session) handleMsgOut() {
 	for {
 		select {
 		case msg := <-s.msgOut:
-			err := s.Conn.Write(msg)
+			msg.Seq = s.SeqNet
+			s.SeqNet++
+			err := s.Conn.Write(msg.Serialize())
 			if err != nil {
 				fmt.Println("failed to write to IPC")
 				return
@@ -228,13 +230,6 @@ func (s *Session) handleSendQueue() {
 	}
 }
 
-func (p *Session) SendRaw(data []byte) {
-	select {
-	case p.msgOut <- data:
-	case <-p.ctx.Done():
-	}
-}
-
 func (p *Session) newWalEntry(entry *wal.WalEntry) error {
 	/* Append to the send queue */
 	data, err := entry.Serialize()
@@ -252,7 +247,7 @@ func (p *Session) newWalEntry(entry *wal.WalEntry) error {
 
 	/* Send the WAL entry to the uplink (optimization: don't wait for the uplink to read from the send queue) */
 	pkt := protocol.Packet{Op: protocol.OpWal, Data: data}
-	p.SendUplink(&pkt)
+	p.TrySendUplink(&pkt)
 
 	return nil
 }
@@ -283,47 +278,64 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		return fmt.Errorf("unhandled WAL type: %d", w.Type)
 	}
 
-	return p.newWalEntry(&entry)
+	err := p.newWalEntry(&entry)
+	if err != nil {
+		return fmt.Errorf("failed to create new WAL entry: %v", err)
+	}
+
+	/* ACK the WAL entry */
+	var payload [4]byte
+	binary.BigEndian.PutUint32(payload[:], w.Token)
+	ackMsg := ipc.Message{
+		Op:      ipc.OpWalAck,
+		Payload: payload[:],
+	}
+	p.Send(&ackMsg)
+	fmt.Printf("sent ACK: %+v", ackMsg)
+
+	return nil
 }
 
 func (s *Session) sendGameWal(index uint32) error {
-	entry := s.wal.Get(index)
-	if entry == nil {
-		return nil
-	}
-
-	/* Send to the game */
-	var data []byte
-	switch entry.Type {
-	case wal.WalItem:
-		body := ipc.WalItemOut{
-			From:       entry.From,
-			To:         entry.Item.To,
-			Game:       entry.Item.Game,
-			GI:         entry.Item.GI,
-			Flags:      entry.Item.Flags,
-			Key:        entry.Item.Key,
-			PlayerName: entry.PlayerName,
+	for i := uint32(0); i < 16; i++ {
+		entry := s.wal.Get(index + i)
+		if entry == nil {
+			return nil
 		}
-		data = body.Serialize()
-	default:
-		fmt.Println("warn: unhandled WAL entry type:", entry.Type)
+
+		/* Send to the game */
+		var data []byte
+		switch entry.Type {
+		case wal.WalItem:
+			body := ipc.WalItemOut{
+				From:       entry.From,
+				To:         entry.Item.To,
+				Game:       entry.Item.Game,
+				GI:         entry.Item.GI,
+				Flags:      entry.Item.Flags,
+				Key:        entry.Item.Key,
+				PlayerName: entry.PlayerName,
+			}
+			data = body.Serialize()
+		default:
+			fmt.Println("warn: unhandled WAL entry type:", entry.Type)
+		}
+
+		wrapper := ipc.MessageBodyWalOut{
+			Type:  entry.Type,
+			Index: index + i,
+			Data:  data,
+		}
+
+		msg := ipc.Message{
+			Op:      ipc.OpWal,
+			Payload: wrapper.Serialize(),
+		}
+
+		fmt.Printf("Sending WAL entry to game: %+v\n", entry)
+
+		s.Send(&msg)
 	}
-
-	wrapper := ipc.MessageBodyWalOut{
-		Type:  entry.Type,
-		Index: index,
-		Data:  data,
-	}
-
-	msg := ipc.Message{
-		Op:      ipc.OpWal,
-		Payload: wrapper.Serialize(),
-	}
-
-	fmt.Printf("Sending WAL entry to game: %+v\n", entry)
-
-	s.SendIPC(&msg)
 	return nil
 }
 
@@ -342,35 +354,7 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 
 	switch msg.Op {
 	case ipc.OpHello:
-		helloIn, err := ipc.ParseMessageBodyHelloIn(msg.Payload)
-		if err != nil {
-			return err
-		}
-		if helloIn.Magic != [8]byte{'O', 'o', 'T', 'M', 'M', 0x7f, 0x01, 0x00} {
-			return fmt.Errorf("invalid magic in HELLO_IN message")
-		}
-
-		if helloIn.SessionID != p.SessionID || helloIn.SessionSecret != p.SessionSecret {
-			return fmt.Errorf("invalid session ID or secret in HELLO_IN message")
-		}
-
-		if helloIn.PlayerID != p.PlayerID || helloIn.WorldID != p.WorldID {
-			return fmt.Errorf("invalid player ID or world ID in HELLO_IN message")
-		}
-
-		p.PlayerName = helloIn.PlayerName
-
-		replyBody := ipc.MessageBodyHelloOut{
-			Magic:   [8]byte{'O', 'o', 'T', 'M', 'M', 0x7f, 0x01, 0x00},
-			SeqGame: p.SeqGame,
-			SeqNet:  p.SeqNet,
-		}
-		reply := ipc.Message{
-			Seq:     0,
-			Op:      ipc.OpHello,
-			Payload: replyBody.Serialize(),
-		}
-		p.SendRaw(reply.Serialize())
+		return fmt.Errorf("unexpected HELLO message from game")
 	case ipc.OpWal:
 		walMsg, err := ipc.ParseMessageBodyWalIn(msg.Payload)
 		if err != nil {
@@ -383,13 +367,10 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 	default:
 		return fmt.Errorf("unhandled message opcode: %d", msg.Op)
 	}
-	return nil
 }
 
-func (p *Session) SendIPC(msg *ipc.Message) {
-	msg.Seq = p.SeqNet
-	p.SeqNet++
-	p.SendRaw(msg.Serialize())
+func (p *Session) Send(msg *ipc.Message) {
+	p.msgOut <- msg
 }
 
 func (p *Session) handleMsgLoop() {
