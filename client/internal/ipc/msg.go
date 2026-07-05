@@ -8,8 +8,9 @@ import (
 type Opcode uint8
 
 const (
-	OpHello Opcode = 0x01
-	OpWal   Opcode = 0x02
+	OpHello    Opcode = 0x01
+	OpWal      Opcode = 0x02
+	OpWalQuery Opcode = 0x03
 )
 
 type Message struct {
@@ -26,7 +27,6 @@ type MessageBodyHelloIn struct {
 	PlayerName    [8]byte
 	WorldID       uint8
 	Multiplayer   bool
-	WalIndex      uint32
 }
 
 type MessageBodyHelloOut struct {
@@ -40,12 +40,32 @@ type MessageBodyWalIn struct {
 	Data []byte
 }
 
+type MessageBodyWalQueryIn struct {
+	Index uint32
+}
+
 type WalItemIn struct {
 	To    uint8
 	Game  uint8
 	GI    uint16
 	Flags uint16
 	Key   uint32
+}
+
+type MessageBodyWalOut struct {
+	Type  uint8
+	Index uint32
+	Data  []byte
+}
+
+type WalItemOut struct {
+	From       uint8
+	To         uint8
+	Game       uint8
+	GI         uint16
+	Flags      uint16
+	Key        uint32
+	PlayerName [8]byte
 }
 
 func ParseMessage(data []byte) (*Message, error) {
@@ -60,7 +80,7 @@ func ParseMessage(data []byte) (*Message, error) {
 }
 
 func ParseMessageBodyHelloIn(data []byte) (*MessageBodyHelloIn, error) {
-	if len(data) < 62 {
+	if len(data) < 58 {
 		return nil, fmt.Errorf("message body too short for HELLO_IN")
 	}
 	var body MessageBodyHelloIn
@@ -71,7 +91,6 @@ func ParseMessageBodyHelloIn(data []byte) (*MessageBodyHelloIn, error) {
 	copy(body.PlayerName[:], data[48:56])
 	body.WorldID = data[56]
 	body.Multiplayer = (data[57] != 0)
-	body.WalIndex = binary.BigEndian.Uint32(data[58:62])
 	return &body, nil
 }
 
@@ -111,5 +130,25 @@ func (body *MessageBodyHelloOut) Serialize() []byte {
 	copy(data[0:8], body.Magic[:])
 	binary.BigEndian.PutUint32(data[8:12], body.SeqGame)
 	binary.BigEndian.PutUint32(data[12:16], body.SeqNet)
+	return data
+}
+
+func (body *MessageBodyWalOut) Serialize() []byte {
+	data := make([]byte, 5+len(body.Data))
+	binary.BigEndian.PutUint32(data[0:4], body.Index)
+	data[4] = body.Type
+	copy(data[5:], body.Data)
+	return data
+}
+
+func (item *WalItemOut) Serialize() []byte {
+	data := make([]byte, 19)
+	data[0] = item.From
+	data[1] = item.To
+	data[2] = item.Game
+	binary.BigEndian.PutUint16(data[3:5], item.GI)
+	binary.BigEndian.PutUint16(data[5:7], item.Flags)
+	binary.BigEndian.PutUint32(data[7:11], item.Key)
+	copy(data[11:19], item.PlayerName[:])
 	return data
 }

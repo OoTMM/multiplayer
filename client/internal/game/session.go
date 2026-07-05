@@ -21,7 +21,6 @@ type Session struct {
 	PlayerID      [16]byte
 	PlayerName    [8]byte
 	WorldID       uint8
-	WalIndex      uint32
 	SeqGame       uint32
 	SeqNet        uint32
 	msgIn         chan *ipc.Message
@@ -125,7 +124,6 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 		PlayerID:      hello.PlayerID,
 		PlayerName:    hello.PlayerName,
 		WorldID:       hello.WorldID,
-		WalIndex:      hello.WalIndex,
 		SeqGame:       seqGame,
 		SeqNet:        seqNet,
 		msgIn:         make(chan *ipc.Message, 16),
@@ -288,6 +286,47 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 	return p.newWalEntry(&entry)
 }
 
+func (s *Session) sendGameWal(index uint32) error {
+	entry := s.wal.Get(index)
+	if entry == nil {
+		return nil
+	}
+
+	/* Send to the game */
+	var data []byte
+	switch entry.Type {
+	case wal.WalItem:
+		body := ipc.WalItemOut{
+			From:       entry.From,
+			To:         entry.Item.To,
+			Game:       entry.Item.Game,
+			GI:         entry.Item.GI,
+			Flags:      entry.Item.Flags,
+			Key:        entry.Item.Key,
+			PlayerName: entry.PlayerName,
+		}
+		data = body.Serialize()
+	default:
+		fmt.Println("warn: unhandled WAL entry type:", entry.Type)
+	}
+
+	wrapper := ipc.MessageBodyWalOut{
+		Type:  entry.Type,
+		Index: index,
+		Data:  data,
+	}
+
+	msg := ipc.Message{
+		Op:      ipc.OpWal,
+		Payload: wrapper.Serialize(),
+	}
+
+	fmt.Printf("Sending WAL entry to game: %+v\n", entry)
+
+	s.SendIPC(&msg)
+	return nil
+}
+
 func (p *Session) handleMsg(msg *ipc.Message) error {
 	var expectedSeq uint32
 	if msg.Op == ipc.OpHello {
@@ -300,8 +339,6 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 	if msg.Seq != expectedSeq {
 		return fmt.Errorf("unexpected sequence number: got %d, expected %d", msg.Seq, expectedSeq)
 	}
-
-	fmt.Printf("Handling message from player %s: %+v\n", p.PlayerName, msg)
 
 	switch msg.Op {
 	case ipc.OpHello:
@@ -322,7 +359,6 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		}
 
 		p.PlayerName = helloIn.PlayerName
-		p.WalIndex = helloIn.WalIndex
 
 		replyBody := ipc.MessageBodyHelloOut{
 			Magic:   [8]byte{'O', 'o', 'T', 'M', 'M', 0x7f, 0x01, 0x00},
@@ -341,10 +377,19 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 			return err
 		}
 		return p.handleWalIn(walMsg)
+	case ipc.OpWalQuery:
+		index := binary.BigEndian.Uint32(msg.Payload)
+		return p.sendGameWal(index)
 	default:
 		return fmt.Errorf("unhandled message opcode: %d", msg.Op)
 	}
 	return nil
+}
+
+func (p *Session) SendIPC(msg *ipc.Message) {
+	msg.Seq = p.SeqNet
+	p.SeqNet++
+	p.SendRaw(msg.Serialize())
 }
 
 func (p *Session) handleMsgLoop() {
