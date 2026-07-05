@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/protocol"
@@ -156,6 +157,7 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 	wg.Go(session.handleMsgOut)
 	wg.Go(session.handleMsgLoop)
 	wg.Go(session.handleUplink)
+	wg.Go(session.handleSendQueue)
 
 	/* Wait for cancellation */
 	<-session.ctx.Done()
@@ -203,6 +205,27 @@ func (s *Session) handleMsgOut() {
 			}
 		case <-s.ctx.Done():
 			return
+		}
+	}
+}
+
+func (s *Session) handleSendQueue() {
+	defer s.cancel()
+	for s.ctx.Err() == nil {
+		pending := s.sendQ.Pending()
+		for _, data := range pending {
+			_, err := wal.Parse(data)
+			if err != nil {
+				fmt.Println("failed to parse WAL entry from send queue:", err)
+				return
+			}
+			pkt := protocol.Packet{Op: protocol.OpWal, Data: data}
+			s.SendUplink(&pkt)
+		}
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(10 * time.Second):
 		}
 	}
 }
