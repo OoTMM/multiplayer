@@ -6,12 +6,15 @@ import (
 	"net"
 	"sync"
 
+	"github.com/OoTMM/multiplayer/server/internal/session"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 )
 
 type App struct {
-	ctx      context.Context
-	listener *net.TCPListener
+	ctx        context.Context
+	listener   *net.TCPListener
+	sessions   map[[16]byte]*session.Session
+	sessionsMu sync.Mutex
 }
 
 func Run(ctx context.Context) error {
@@ -23,10 +26,27 @@ func Run(ctx context.Context) error {
 	app := &App{
 		ctx:      ctx,
 		listener: listener,
+		sessions: make(map[[16]byte]*session.Session),
 	}
 
 	app.run()
 	return nil
+}
+
+func (app *App) getSession(sessionID [16]byte, sessionSecret [8]byte) (*session.Session, error) {
+	app.sessionsMu.Lock()
+	defer app.sessionsMu.Unlock()
+
+	if s, ok := app.sessions[sessionID]; ok {
+		if s.Secret != sessionSecret {
+			return nil, fmt.Errorf("invalid session secret")
+		}
+		return s, nil
+	}
+
+	session := session.OpenSession(app.ctx, sessionID, sessionSecret)
+	app.sessions[sessionID] = session
+	return session, nil
 }
 
 func (app *App) handleClient(conn *net.TCPConn) {
@@ -52,6 +72,13 @@ func (app *App) handleClient(conn *net.TCPConn) {
 	}
 
 	fmt.Printf("Received hello from player %s (ID: %d, World: %d)\n", hello.PlayerName, hello.PlayerID, hello.WorldID)
+	session, err := app.getSession(hello.SessionID, hello.SessionSecret)
+	if err != nil {
+		fmt.Println("Failed to get session:", err)
+		return
+	}
+
+	session.Join(hello.PlayerID, hello.WorldID, hello.WalIndex, conn)
 }
 
 func (app *App) run() {

@@ -21,6 +21,11 @@ type ClientHello struct {
 	WalIndex      uint32
 }
 
+type ServerHello struct {
+	Magic   [8]byte
+	Version uint32
+}
+
 func ParseClientHello(data []byte) (*ClientHello, error) {
 	if len(data) < 65 {
 		return nil, fmt.Errorf("client hello too short")
@@ -47,5 +52,22 @@ func (hello *ClientHello) Serialize() []byte {
 	copy(data[52:60], hello.PlayerName[:])
 	data[60] = hello.WorldID
 	binary.LittleEndian.PutUint32(data[61:65], hello.WalIndex)
+	return data
+}
+
+func ParseServerHello(data []byte) (*ServerHello, error) {
+	if len(data) < 12 {
+		return nil, fmt.Errorf("server hello too short")
+	}
+	var hello ServerHello
+	copy(hello.Magic[:], data[0:8])
+	hello.Version = binary.LittleEndian.Uint32(data[8:12])
+	return &hello, nil
+}
+
+func (hello *ServerHello) Serialize() []byte {
+	data := make([]byte, 12)
+	copy(data[0:8], hello.Magic[:])
+	binary.LittleEndian.PutUint32(data[8:12], hello.Version)
 	return data
 }

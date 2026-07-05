@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
@@ -124,6 +125,26 @@ drain_done:
 	}
 
 	fmt.Println("Sent hello packet to server")
+
+	/* Wait for server hello packet */
+	pkt, err := protocol.RecvRaw(u.conn)
+	if err != nil {
+		return err
+	}
+
+	if pkt.Op != protocol.OpHello {
+		return fmt.Errorf("unexpected operation code: %d", pkt.Op)
+	}
+	if len(pkt.Data) < 12 {
+		return fmt.Errorf("server hello too short")
+	}
+	if string(pkt.Data[0:8]) != "OoTMM\x7f\x01\x00" {
+		return fmt.Errorf("invalid magic in server hello")
+	}
+	if binary.LittleEndian.Uint32(pkt.Data[8:12]) != 0x00010000 {
+		return fmt.Errorf("invalid version in server hello")
+	}
+	fmt.Println("Received server hello packet")
 
 	/* Start I/O */
 	wg.Go(u.pumpIn)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
+	"github.com/OoTMM/multiplayer/shared/protocol"
 	"github.com/OoTMM/multiplayer/shared/wal"
 )
 
@@ -208,6 +209,11 @@ func (p *Session) newWalEntry(entry *wal.WalEntry) error {
 
 	p.sendQ.Add(dedupKey, data)
 	fmt.Printf("Added WAL entry to send queue: %+v\n", entry)
+
+	/* Send the WAL entry to the uplink (optimization: don't wait for the uplink to read from the send queue) */
+	pkt := protocol.Packet{Op: protocol.OpWal, Data: data}
+	p.uplink.Send(&pkt)
+
 	return nil
 }
 
