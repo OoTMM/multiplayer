@@ -44,7 +44,10 @@ func (app *App) getSession(sessionID [16]byte, sessionSecret [8]byte) (*session.
 		return s, nil
 	}
 
-	session := session.OpenSession(app.ctx, sessionID, sessionSecret)
+	session, err := session.OpenSession(app.ctx, sessionID, sessionSecret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open session: %v", err)
+	}
 	app.sessions[sessionID] = session
 	return session, nil
 }

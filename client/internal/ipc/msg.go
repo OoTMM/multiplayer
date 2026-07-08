@@ -12,12 +12,20 @@ const (
 	OpWal      Opcode = 0x02
 	OpWalQuery Opcode = 0x03
 	OpWalAck   Opcode = 0x04
+	OpPosition Opcode = 0x05
 )
 
 type Message struct {
 	Seq     uint32
 	Op      Opcode
 	Payload []byte
+}
+
+type MessageBodyPositionIn struct {
+	Key uint16
+	X   int16
+	Y   int16
+	Z   int16
 }
 
 type MessageBodyHelloIn struct {
@@ -81,6 +89,18 @@ func ParseMessage(data []byte) (*Message, error) {
 	return &msg, nil
 }
 
+func ParseMessageBodyPositionIn(data []byte) (*MessageBodyPositionIn, error) {
+	if len(data) < 8 {
+		return nil, fmt.Errorf("message body too short for POSITION_IN")
+	}
+	var body MessageBodyPositionIn
+	body.Key = binary.BigEndian.Uint16(data[0:2])
+	body.X = int16(binary.BigEndian.Uint16(data[2:4]))
+	body.Y = int16(binary.BigEndian.Uint16(data[4:6]))
+	body.Z = int16(binary.BigEndian.Uint16(data[6:8]))
+	return &body, nil
+}
+
 func ParseMessageBodyHelloIn(data []byte) (*MessageBodyHelloIn, error) {
 	if len(data) < 58 {
 		return nil, fmt.Errorf("message body too short for HELLO_IN")
@@ -108,7 +128,7 @@ func ParseMessageBodyWalIn(data []byte) (*MessageBodyWalIn, error) {
 }
 
 func ParseWalItemIn(data []byte) (*WalItemIn, error) {
-	if len(data) < 9 {
+	if len(data) < 10 {
 		return nil, fmt.Errorf("WAL item too short")
 	}
 	var item WalItemIn

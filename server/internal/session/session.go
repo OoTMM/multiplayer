@@ -48,17 +48,15 @@ func getDataPath(sessionID [16]byte) (string, error) {
 	return dataDir, nil
 }
 
-func OpenSession(ctx context.Context, sessionID [16]byte, sessionSecret [8]byte) *Session {
+func OpenSession(ctx context.Context, sessionID [16]byte, sessionSecret [8]byte) (*Session, error) {
 	dataPath, err := getDataPath(sessionID)
 	if err != nil {
-		fmt.Println("Failed to get data path:", err)
-		return nil
+		return nil, fmt.Errorf("failed to get data path: %v", err)
 	}
 
 	wal, err := wal.OpenWAL(fmt.Sprintf("%s/wal.bin", dataPath))
 	if err != nil {
-		fmt.Println("Failed to open WAL:", err)
-		return nil
+		return nil, fmt.Errorf("failed to open WAL: %v", err)
 	}
 
 	session := &Session{
@@ -70,7 +68,7 @@ func OpenSession(ctx context.Context, sessionID [16]byte, sessionSecret [8]byte)
 		wal:     wal,
 	}
 
-	return session
+	return session, nil
 }
 
 func (p *Player) handlePacket(pkt *protocol.Packet) error {

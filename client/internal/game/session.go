@@ -14,6 +14,13 @@ import (
 	"github.com/OoTMM/multiplayer/shared/wal"
 )
 
+type SelfPosition struct {
+	Key uint16
+	X   int16
+	Y   int16
+	Z   int16
+}
+
 type Session struct {
 	Conn          ipc.Conn
 	SessionID     [16]byte
@@ -33,6 +40,8 @@ type Session struct {
 	dataDir       string
 	sendQ         *SendQueue
 	wal           *wal.WAL
+	pos           SelfPosition
+	posMu         sync.Mutex
 }
 
 func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
@@ -135,6 +144,9 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 		dataDir:       dataDir,
 		sendQ:         sendQ,
 		wal:           wal,
+		pos: SelfPosition{
+			Key: 0xffff,
+		},
 	}
 
 	/* Queue the HELLO OUT message */
@@ -156,6 +168,7 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 	wg.Go(session.handleMsgLoop)
 	wg.Go(session.handleUplink)
 	wg.Go(session.handleSendQueue)
+	wg.Go(session.handleSendPosition)
 
 	/* Wait for cancellation */
 	<-session.ctx.Done()
@@ -226,6 +239,31 @@ func (s *Session) handleSendQueue() {
 		case <-s.ctx.Done():
 			return
 		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+func (s *Session) handleSendPosition() {
+	var pos SelfPosition
+	defer s.cancel()
+	for s.ctx.Err() == nil {
+		/* Copy the position */
+		s.posMu.Lock()
+		pos = s.pos
+		s.pos.Key = 0xffff
+		s.posMu.Unlock()
+
+		/* Send the position */
+		/* DEBUG */
+		if pos.Key != 0xffff {
+			fmt.Printf("Sending POSITION message to uplink: %+v\n", pos)
+		}
+
+		/* Wait */
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }
@@ -364,6 +402,18 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 	case ipc.OpWalQuery:
 		index := binary.BigEndian.Uint32(msg.Payload)
 		return p.sendGameWal(index)
+	case ipc.OpPosition:
+		posMsg, err := ipc.ParseMessageBodyPositionIn(msg.Payload)
+		if err != nil {
+			return err
+		}
+		p.posMu.Lock()
+		p.pos.Key = posMsg.Key
+		p.pos.X = posMsg.X
+		p.pos.Y = posMsg.Y
+		p.pos.Z = posMsg.Z
+		p.posMu.Unlock()
+		return nil
 	default:
 		return fmt.Errorf("unhandled message opcode: %d", msg.Op)
 	}

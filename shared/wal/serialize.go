@@ -18,7 +18,7 @@ func Parse(data []byte) (*WalEntry, error) {
 
 	switch entry.Type {
 	case WalItem:
-		if len(data) < 34 {
+		if len(data) < 40 {
 			return nil, fmt.Errorf("WAL item entry too short")
 		}
 		entry.Item.To = data[26]
