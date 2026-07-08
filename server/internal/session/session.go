@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -71,8 +72,19 @@ func OpenSession(ctx context.Context, sessionID [16]byte, sessionSecret [8]byte)
 	return session, nil
 }
 
+func (s *Session) Broadcast(pkt *protocol.Packet) {
+	s.playersMutex.RLock()
+	defer s.playersMutex.RUnlock()
+
+	for player := range s.players {
+		select {
+		case player.out <- pkt:
+		case <-player.ctx.Done():
+		}
+	}
+}
+
 func (p *Player) handlePacket(pkt *protocol.Packet) error {
-	fmt.Printf("Received packet from player: Op=%d, Data=%x\n", pkt.Op, pkt.Data)
 	switch pkt.Op {
 	case protocol.OpWal:
 		entry, err := wal.Parse(pkt.Data)
@@ -94,6 +106,25 @@ func (p *Player) handlePacket(pkt *protocol.Packet) error {
 			Op:   protocol.OpWalAck,
 			Data: dedupKey[:],
 		})
+	case protocol.OpPosition:
+		pos, err := protocol.ParseClientPosition(pkt.Data)
+		if err != nil {
+			return fmt.Errorf("failed to parse client position: %v", err)
+		}
+		body := &protocol.ServerPosition{
+			ID:   p.ID,
+			Name: [8]byte{'P', 'l', 'a', 'y', 'e', 'r', 0, 0},
+			Key:  pos.Key,
+			X:    pos.X,
+			Y:    pos.Y,
+			Z:    pos.Z,
+		}
+		p.Session.Broadcast(&protocol.Packet{
+			Op:   protocol.OpPosition,
+			Data: body.Serialize(),
+		})
+	default:
+		slog.Warn("Unhandled packet opcode", "op", pkt.Op)
 	}
 	return nil
 }

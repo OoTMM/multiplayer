@@ -14,13 +14,6 @@ import (
 	"github.com/OoTMM/multiplayer/shared/wal"
 )
 
-type SelfPosition struct {
-	Key uint16
-	X   int16
-	Y   int16
-	Z   int16
-}
-
 type Session struct {
 	Conn          ipc.Conn
 	SessionID     [16]byte
@@ -40,8 +33,8 @@ type Session struct {
 	dataDir       string
 	sendQ         *SendQueue
 	wal           *wal.WAL
-	pos           SelfPosition
-	posMu         sync.Mutex
+
+	positions *PositionSystem
 }
 
 func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
@@ -70,6 +63,12 @@ func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
 		copy(dedupKey[:], pkt.Data)
 		s.sendQ.Ack(dedupKey)
 		fmt.Printf("Received WAL ACK from uplink: %x\n", dedupKey)
+	case protocol.OpPosition:
+		posMsg, err := protocol.ParseServerPosition(pkt.Data)
+		if err != nil {
+			return fmt.Errorf("failed to parse server position packet: %v", err)
+		}
+		s.positions.OnServerPos(posMsg)
 	default:
 		fmt.Printf("warn: unhandled uplink packet: Op=%d, Data=%x\n", pkt.Op, pkt.Data)
 	}
@@ -144,9 +143,6 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 		dataDir:       dataDir,
 		sendQ:         sendQ,
 		wal:           wal,
-		pos: SelfPosition{
-			Key: 0xffff,
-		},
 	}
 
 	/* Queue the HELLO OUT message */
@@ -162,16 +158,20 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 	}
 	session.Conn.Write(helloOut.Serialize())
 
+	/* Create systems */
+	session.positions = createPositionSystem(session)
+	defer session.positions.Close()
+
 	/* Start helper I/O goroutines */
 	wg.Go(session.handleMsgIn)
 	wg.Go(session.handleMsgOut)
 	wg.Go(session.handleMsgLoop)
 	wg.Go(session.handleUplink)
 	wg.Go(session.handleSendQueue)
-	wg.Go(session.handleSendPosition)
 
 	/* Wait for cancellation */
 	<-session.ctx.Done()
+	session.positions.Close()
 	session.Conn.Close()
 	wg.Wait()
 
@@ -239,31 +239,6 @@ func (s *Session) handleSendQueue() {
 		case <-s.ctx.Done():
 			return
 		case <-time.After(10 * time.Second):
-		}
-	}
-}
-
-func (s *Session) handleSendPosition() {
-	var pos SelfPosition
-	defer s.cancel()
-	for s.ctx.Err() == nil {
-		/* Copy the position */
-		s.posMu.Lock()
-		pos = s.pos
-		s.pos.Key = 0xffff
-		s.posMu.Unlock()
-
-		/* Send the position */
-		/* DEBUG */
-		if pos.Key != 0xffff {
-			fmt.Printf("Sending POSITION message to uplink: %+v\n", pos)
-		}
-
-		/* Wait */
-		select {
-		case <-s.ctx.Done():
-			return
-		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }
@@ -407,12 +382,7 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		if err != nil {
 			return err
 		}
-		p.posMu.Lock()
-		p.pos.Key = posMsg.Key
-		p.pos.X = posMsg.X
-		p.pos.Y = posMsg.Y
-		p.pos.Z = posMsg.Z
-		p.posMu.Unlock()
+		p.positions.OnGamePos(posMsg)
 		return nil
 	default:
 		return fmt.Errorf("unhandled message opcode: %d", msg.Op)
