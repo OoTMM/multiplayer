@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"encoding/binary"
 	"sync"
 	"time"
 
@@ -73,7 +74,7 @@ func (s *PositionSystem) tick() {
 }
 
 func (s *PositionSystem) run() {
-	tick := time.NewTicker(100 * time.Millisecond)
+	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	defer close(s.done)
 
@@ -111,6 +112,22 @@ func (s *PositionSystem) OnServerPos(pkt *protocol.ServerPosition) {
 		},
 		TTL: 30,
 	}
+
+	/* Debug */
+	body := ipc.MessageBodyPositionOut{
+		ID:    0,
+		Color: binary.BigEndian.Uint16(pkt.ID[0:2]),
+		Name:  pkt.Name,
+		Key:   pkt.Key,
+		X:     pkt.X,
+		Y:     pkt.Y,
+		Z:     pkt.Z,
+	}
+
+	s.session.TrySend(&ipc.Message{
+		Op:      ipc.OpPosition,
+		Payload: body.Serialize(),
+	})
 }
 
 func (s *PositionSystem) Close() {

@@ -28,6 +28,16 @@ type MessageBodyPositionIn struct {
 	Z   int16
 }
 
+type MessageBodyPositionOut struct {
+	ID    uint16
+	Color uint16
+	Name  [8]byte
+	Key   uint16
+	X     int16
+	Y     int16
+	Z     int16
+}
+
 type MessageBodyHelloIn struct {
 	Magic         [8]byte
 	SessionID     [16]byte
@@ -173,5 +183,17 @@ func (item *WalItemOut) Serialize() []byte {
 	binary.BigEndian.PutUint16(data[5:7], item.Flags)
 	binary.BigEndian.PutUint32(data[7:11], item.Key)
 	copy(data[11:19], item.PlayerName[:])
+	return data
+}
+
+func (body *MessageBodyPositionOut) Serialize() []byte {
+	data := make([]byte, 20)
+	binary.BigEndian.PutUint16(data[0:2], body.ID)
+	binary.BigEndian.PutUint16(data[2:4], body.Color)
+	copy(data[4:12], body.Name[:])
+	binary.BigEndian.PutUint16(data[12:14], body.Key)
+	binary.BigEndian.PutUint16(data[14:16], uint16(body.X))
+	binary.BigEndian.PutUint16(data[16:18], uint16(body.Y))
+	binary.BigEndian.PutUint16(data[18:20], uint16(body.Z))
 	return data
 }

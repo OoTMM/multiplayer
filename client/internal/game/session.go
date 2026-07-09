@@ -393,6 +393,13 @@ func (p *Session) Send(msg *ipc.Message) {
 	p.msgOut <- msg
 }
 
+func (p *Session) TrySend(msg *ipc.Message) {
+	select {
+	case p.msgOut <- msg:
+	default:
+	}
+}
+
 func (p *Session) handleMsgLoop() {
 	defer p.cancel()
 	for {
