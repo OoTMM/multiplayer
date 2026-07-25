@@ -283,8 +283,15 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		entry.Item.GI = item.GI
 		entry.Item.Flags = item.Flags
 		entry.Item.Key = item.Key
-		entry.Item.Nonce = 0
-		/* Todo: Handle nonce */
+
+		/* 0x0001 is OVF_RENEW, this should cause a nonce to be used */
+		if item.Flags&0x0001 != 0 {
+			var nonce [4]byte
+			rand.Read(nonce[:])
+			entry.Item.Nonce = binary.LittleEndian.Uint32(nonce[:])
+		} else {
+			entry.Item.Nonce = 0
+		}
 	default:
 		return fmt.Errorf("unhandled WAL type: %d", w.Type)
 	}
