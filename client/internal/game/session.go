@@ -321,6 +321,12 @@ func (s *Session) sendGameWal(index uint32) error {
 			return nil
 		}
 
+		/* Send the player name ONLY if the entry is from a different player */
+		var playerName [8]byte
+		if entry.PlayerID != s.PlayerID {
+			copy(playerName[:], entry.PlayerName[:])
+		}
+
 		/* Send to the game */
 		var data []byte
 		switch entry.Type {
@@ -332,7 +338,7 @@ func (s *Session) sendGameWal(index uint32) error {
 				GI:         entry.Item.GI,
 				Flags:      entry.Item.Flags,
 				Key:        entry.Item.Key,
-				PlayerName: entry.PlayerName,
+				PlayerName: playerName,
 			}
 			data = body.Serialize()
 		default:
