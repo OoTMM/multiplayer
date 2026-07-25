@@ -25,6 +25,7 @@ type Session struct {
 type Player struct {
 	Session  *Session
 	ID       [16]byte
+	Name     [8]byte
 	WorldID  uint8
 	WalIndex uint32
 	Conn     net.Conn
@@ -113,7 +114,7 @@ func (p *Player) handlePacket(pkt *protocol.Packet) error {
 		}
 		body := &protocol.ServerPosition{
 			ID:   p.ID,
-			Name: [8]byte{'P', 'l', 'a', 'y', 'e', 'r', 0, 0},
+			Name: p.Name,
 			Key:  pos.Key,
 			X:    pos.X,
 			Y:    pos.Y,
@@ -222,13 +223,14 @@ func (p *Player) handleWalStream() {
 	}
 }
 
-func (s *Session) Join(PlayerID [16]byte, worldID uint8, walIndex uint32, conn net.Conn) {
+func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, walIndex uint32, conn net.Conn) {
 	wg := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(s.ctx)
 
 	player := &Player{
 		Session:  s,
 		ID:       PlayerID,
+		Name:     PlayerName,
 		WorldID:  worldID,
 		WalIndex: walIndex,
 		Conn:     conn,

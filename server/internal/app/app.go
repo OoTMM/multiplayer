@@ -81,7 +81,7 @@ func (app *App) handleClient(conn *net.TCPConn) {
 		return
 	}
 
-	session.Join(hello.PlayerID, hello.WorldID, hello.WalIndex, conn)
+	session.Join(hello.PlayerID, hello.PlayerName, hello.WorldID, hello.WalIndex, conn)
 }
 
 func (app *App) run() {

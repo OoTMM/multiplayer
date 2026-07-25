@@ -62,7 +62,6 @@ func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
 		var dedupKey [16]byte
 		copy(dedupKey[:], pkt.Data)
 		s.sendQ.Ack(dedupKey)
-		fmt.Printf("Received WAL ACK from uplink: %x\n", dedupKey)
 	case protocol.OpPosition:
 		posMsg, err := protocol.ParseServerPosition(pkt.Data)
 		if err != nil {
@@ -256,7 +255,6 @@ func (p *Session) newWalEntry(entry *wal.WalEntry) error {
 	}
 
 	p.sendQ.Add(dedupKey, data)
-	fmt.Printf("Added WAL entry to send queue: %+v\n", entry)
 
 	/* Send the WAL entry to the uplink (optimization: don't wait for the uplink to read from the send queue) */
 	pkt := protocol.Packet{Op: protocol.OpWal, Data: data}
@@ -344,8 +342,6 @@ func (s *Session) sendGameWal(index uint32) error {
 			Op:      ipc.OpWal,
 			Payload: wrapper.Serialize(),
 		}
-
-		fmt.Printf("Sending WAL entry to game: %+v\n", entry)
 
 		s.Send(&msg)
 	}

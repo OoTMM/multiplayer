@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"sync"
 	"time"
 
@@ -18,19 +19,22 @@ type PositionData struct {
 }
 
 type PlayerData struct {
-	Name [8]byte
-	Pos  PositionData
-	TTL  int
+	Name    [8]byte
+	LocalID uint16
+	TTL     int
 }
 
 type PositionSystem struct {
-	session  *Session
-	ctx      context.Context
-	cancel   context.CancelFunc
-	done     chan struct{}
-	mu       sync.Mutex
-	pos      PositionData
-	otherPos map[[16]byte]PlayerData
+	session *Session
+	ctx     context.Context
+	cancel  context.CancelFunc
+	done    chan struct{}
+	mu      sync.Mutex
+	pos     PositionData
+
+	local       map[[16]byte]*PlayerData
+	localIdFree []uint16
+	localIdNext uint16
 }
 
 func createPositionSystem(session *Session) *PositionSystem {
@@ -41,10 +45,12 @@ func createPositionSystem(session *Session) *PositionSystem {
 		pos: PositionData{
 			Key: 0xffff,
 		},
-		ctx:      ctx,
-		cancel:   cancel,
-		otherPos: make(map[[16]byte]PlayerData),
-		done:     make(chan struct{}),
+		ctx:         ctx,
+		cancel:      cancel,
+		local:       make(map[[16]byte]*PlayerData),
+		localIdFree: make([]uint16, 0),
+		localIdNext: 1,
+		done:        make(chan struct{}),
 	}
 
 	go system.run()
@@ -69,8 +75,23 @@ func (s *PositionSystem) sendSelfPos() {
 	}
 }
 
+func (s *PositionSystem) lowerTTLs() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, data := range s.local {
+		data.TTL--
+		if data.TTL <= 0 {
+			delete(s.local, id)
+			s.localIdFree = append(s.localIdFree, data.LocalID)
+			fmt.Printf("Player %s (ID: %x) timed out and was removed\n", data.Name, id)
+		}
+	}
+}
+
 func (s *PositionSystem) tick() {
 	s.sendSelfPos()
+	s.lowerTTLs()
 }
 
 func (s *PositionSystem) run() {
@@ -102,20 +123,29 @@ func (s *PositionSystem) OnServerPos(pkt *protocol.ServerPosition) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.otherPos[pkt.ID] = PlayerData{
-		Name: pkt.Name,
-		Pos: PositionData{
-			Key: pkt.Key,
-			X:   pkt.X,
-			Y:   pkt.Y,
-			Z:   pkt.Z,
-		},
-		TTL: 30,
+	data, ok := s.local[pkt.ID]
+	if !ok {
+		fmt.Printf("Received pos from new player: %s (ID: %x)\n", pkt.Name, pkt.ID)
+		var localID uint16
+		if len(s.localIdFree) > 0 {
+			localID = s.localIdFree[len(s.localIdFree)-1]
+			s.localIdFree = s.localIdFree[:len(s.localIdFree)-1]
+		} else {
+			localID = s.localIdNext
+			s.localIdNext++
+		}
+		data = &PlayerData{
+			LocalID: localID,
+			Name:    pkt.Name,
+			TTL:     30,
+		}
+		s.local[pkt.ID] = data
+	} else {
+		data.TTL = 30
 	}
 
-	/* Debug */
 	body := ipc.MessageBodyPositionOut{
-		ID:    0,
+		ID:    data.LocalID,
 		Color: binary.BigEndian.Uint16(pkt.ID[0:2]),
 		Name:  pkt.Name,
 		Key:   pkt.Key,
