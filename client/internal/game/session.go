@@ -9,12 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OoTMM/multiplayer/client/internal/config"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 	"github.com/OoTMM/multiplayer/shared/wal"
 )
 
 type Session struct {
+	Conf          *config.Config
 	Conn          ipc.Conn
 	SessionID     [16]byte
 	SessionSecret [8]byte
@@ -77,26 +79,21 @@ func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
 	return nil
 }
 
-func makeDataDir(id []byte) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	dataDir := fmt.Sprintf("%s/data/sessions/%02x/%030x", cwd, id[0:2], id[2:])
-	err = os.MkdirAll(dataDir, 0755)
+func makeDataDir(prefix string, id []byte) (string, error) {
+	dataDir := fmt.Sprintf("%s/sessions/%02x/%030x", prefix, id[0:2], id[2:])
+	err := os.MkdirAll(dataDir, 0755)
 	if err != nil {
 		return "", err
 	}
 	return dataDir, nil
 }
 
-func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
+func Run(ctx context.Context, conf *config.Config, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	dataDir, err := makeDataDir(hello.SessionID[:])
+	dataDir, err := makeDataDir(conf.DataDir, hello.SessionID[:])
 	if err != nil {
 		fmt.Println("failed to create data directory:", err)
 		return
@@ -127,6 +124,7 @@ func Run(ctx context.Context, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 	seqNet := binary.LittleEndian.Uint32(randBytes[4:8])
 
 	session := &Session{
+		Conf:          conf,
 		Conn:          conn,
 		SessionID:     hello.SessionID,
 		SessionSecret: hello.SessionSecret,

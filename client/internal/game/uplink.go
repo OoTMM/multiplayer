@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -37,7 +38,8 @@ func (s *Session) handleUplinkConn() {
 	defer cancel()
 
 	/* Connect */
-	conn, err := net.DialTimeout("tcp", "localhost:14236", 10*time.Second)
+	addr := net.JoinHostPort(s.Conf.UpstreamServer, strconv.Itoa(int(s.Conf.UpstreamPort)))
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		if s.ctx.Err() == nil {
 			fmt.Println("Failed to connect to uplink:", err)

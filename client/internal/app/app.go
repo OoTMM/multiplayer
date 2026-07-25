@@ -5,17 +5,21 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/OoTMM/multiplayer/client/internal/config"
 	"github.com/OoTMM/multiplayer/client/internal/game"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 )
 
 type App struct {
-	ctx context.Context
+	conf *config.Config
+	ctx  context.Context
 }
 
 func Run(ctx context.Context) {
+	conf := config.ParseConfig()
 	app := &App{
-		ctx: ctx,
+		conf: conf,
+		ctx:  ctx,
 	}
 
 	app.loop()
@@ -86,7 +90,7 @@ func (app *App) loop() {
 		}
 		conn, hello := app.poll()
 		if conn != nil && hello != nil {
-			game.Run(app.ctx, conn, hello)
+			game.Run(app.ctx, app.conf, conn, hello)
 		} else {
 			select {
 			case <-app.ctx.Done():
