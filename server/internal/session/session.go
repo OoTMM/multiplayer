@@ -74,16 +74,24 @@ func OpenSession(ctx context.Context, sessionID [16]byte, sessionSecret [8]byte)
 	return session, nil
 }
 
-func (s *Session) Broadcast(pkt *protocol.Packet) {
+func (s *Session) BroadcastExcept(pkt *protocol.Packet, excluded *Player) {
 	s.playersMutex.RLock()
 	defer s.playersMutex.RUnlock()
 
 	for player := range s.players {
+		if player == excluded {
+			continue
+		}
+
 		select {
 		case player.out <- pkt:
 		case <-player.ctx.Done():
 		}
 	}
+}
+
+func (s *Session) Broadcast(pkt *protocol.Packet) {
+	s.BroadcastExcept(pkt, nil)
 }
 
 func (p *Player) handlePacket(pkt *protocol.Packet) error {
@@ -123,10 +131,10 @@ func (p *Player) handlePacket(pkt *protocol.Packet) error {
 			Y:    pos.Y,
 			Z:    pos.Z,
 		}
-		p.Session.Broadcast(&protocol.Packet{
+		p.Session.BroadcastExcept(&protocol.Packet{
 			Op:   protocol.OpPosition,
 			Data: body.Serialize(),
-		})
+		}, p)
 	default:
 		slog.Warn("Unhandled packet opcode", "op", pkt.Op)
 	}
