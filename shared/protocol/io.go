@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"time"
 )
 
 func SendRaw(conn net.Conn, pkt *Packet) error {
@@ -36,4 +37,14 @@ func RecvRaw(conn net.Conn) (*Packet, error) {
 		Op:   Opcode(header[2]),
 		Data: data,
 	}, nil
+}
+
+func RecvRawTimeout(conn net.Conn, timeout time.Duration) (*Packet, error) {
+	conn.SetReadDeadline(time.Now().Add(timeout))
+	defer conn.SetReadDeadline(time.Time{})
+	return RecvRaw(conn)
+}
+
+func RecvRawTimeoutDefault(conn net.Conn) (*Packet, error) {
+	return RecvRawTimeout(conn, 10*time.Second)
 }

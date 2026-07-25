@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/OoTMM/multiplayer/shared/protocol"
 	"github.com/OoTMM/multiplayer/shared/wal"
@@ -87,6 +88,8 @@ func (s *Session) Broadcast(pkt *protocol.Packet) {
 
 func (p *Player) handlePacket(pkt *protocol.Packet) error {
 	switch pkt.Op {
+	case protocol.OpNOP:
+		return nil
 	case protocol.OpWal:
 		entry, err := wal.Parse(pkt.Data)
 		if err != nil {
@@ -149,7 +152,7 @@ func (p *Player) handlePackets() {
 func (p *Player) handleMsgIn() {
 	defer p.cancel()
 	for p.ctx.Err() == nil {
-		pkt, err := protocol.RecvRaw(p.Conn)
+		pkt, err := protocol.RecvRawTimeoutDefault(p.Conn)
 		if err != nil {
 			if p.ctx.Err() == nil {
 				fmt.Println("Failed to receive packet:", err)
@@ -176,6 +179,31 @@ func (p *Player) handleMsgOut() {
 				if p.ctx.Err() == nil {
 					fmt.Println("Failed to send packet:", err)
 				}
+				return
+			}
+		case <-p.ctx.Done():
+			return
+		}
+	}
+}
+
+func (p *Player) handleNops() {
+	pkt := &protocol.Packet{
+		Op:   protocol.OpNOP,
+		Data: []byte{},
+	}
+
+	defer p.cancel()
+	tick := time.NewTicker(3 * time.Second)
+	defer tick.Stop()
+
+	for p.ctx.Err() == nil {
+		select {
+		case <-tick.C:
+			select {
+			default:
+			case p.out <- pkt:
+			case <-p.ctx.Done():
 				return
 			}
 		case <-p.ctx.Done():
@@ -219,7 +247,7 @@ func (p *Player) handleWalStream() {
 			Data: bodyData,
 		})
 
-		fmt.Printf("Sent WAL entry to player %s: Index=%d, Entry=%+v\n", p.ID, index, entry)
+		fmt.Printf("Sent WAL entry to player: Index=%d, Entry=%+v\n", index, entry)
 	}
 }
 
@@ -260,6 +288,7 @@ func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, wal
 		wg.Go(player.handleMsgOut)
 		wg.Go(player.handlePackets)
 		wg.Go(player.handleWalStream)
+		wg.Go(player.handleNops)
 		<-ctx.Done()
 	} else {
 		fmt.Println("Failed to send hello packet:", err)

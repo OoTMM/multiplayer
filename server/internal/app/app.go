@@ -55,7 +55,7 @@ func (app *App) getSession(sessionID [16]byte, sessionSecret [8]byte) (*session.
 func (app *App) handleClient(conn *net.TCPConn) {
 	defer conn.Close()
 
-	pkt, err := protocol.RecvRaw(conn)
+	pkt, err := protocol.RecvRawTimeoutDefault(conn)
 	if err != nil {
 		if app.ctx.Err() == nil {
 			fmt.Println("Failed to receive packet:", err)

@@ -39,6 +39,8 @@ type Session struct {
 
 func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
 	switch pkt.Op {
+	case protocol.OpNOP:
+		return nil
 	case protocol.OpWal:
 		body, err := protocol.ParseServerWal(pkt.Data)
 		if err != nil {

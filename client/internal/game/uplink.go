@@ -78,6 +78,7 @@ drain_done:
 	wg := sync.WaitGroup{}
 	wg.Go(uplink.pumpIn)
 	wg.Go(uplink.pumpOut)
+	wg.Go(uplink.handleNops)
 	wg.Go(uplink.handlePackets)
 
 	/* Sync */
@@ -111,8 +112,7 @@ func (u *Uplink) handshake() error {
 	}
 
 	/* Wait for server reply */
-	u.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	pkt, err := protocol.RecvRaw(u.conn)
+	pkt, err := protocol.RecvRawTimeoutDefault(u.conn)
 	if err != nil {
 		return err
 	}
@@ -130,14 +130,13 @@ func (u *Uplink) handshake() error {
 		return fmt.Errorf("invalid version in server hello")
 	}
 	fmt.Println("Received server hello packet")
-	u.conn.SetReadDeadline(time.Time{})
 	return nil
 }
 
 func (u *Uplink) pumpIn() {
 	defer u.cancel()
 	for u.ctx.Err() == nil {
-		pkt, err := protocol.RecvRaw(u.conn)
+		pkt, err := protocol.RecvRawTimeoutDefault(u.conn)
 		if err != nil {
 			if u.ctx.Err() == nil {
 				fmt.Println("Failed to receive packet from uplink:", err)
@@ -165,6 +164,26 @@ func (u *Uplink) pumpOut() {
 				}
 				return
 			}
+		case <-u.ctx.Done():
+			return
+		}
+	}
+}
+
+func (u *Uplink) handleNops() {
+	pkt := &protocol.Packet{
+		Op:   protocol.OpNOP,
+		Data: []byte{},
+	}
+
+	defer u.cancel()
+	tick := time.NewTicker(3 * time.Second)
+	defer tick.Stop()
+
+	for u.ctx.Err() == nil {
+		select {
+		case <-tick.C:
+			u.session.TrySendUplink(pkt)
 		case <-u.ctx.Done():
 			return
 		}
