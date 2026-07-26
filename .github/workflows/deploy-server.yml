@@ -23,6 +23,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           push: true
+          file: ./Dockerfile.prod
           tags: |
             ghcr.io/ootmm/multi-server:latest
             ghcr.io/ootmm/multi-server:${{ github.sha }}
