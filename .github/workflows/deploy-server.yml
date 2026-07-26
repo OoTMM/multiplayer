@@ -57,5 +57,5 @@ jobs:
       - name: Commit and Push Changes
         run: |
           git add stacks/multi-server/compose.yaml
-          git commit -m "Update multi-server image to $IMAGE_NAME"
+          git commit -m "Update multi-server image to ${{ needs.publish.outputs.image_name }}"
           git push origin master
