@@ -6,12 +6,14 @@ import (
 	"net"
 	"sync"
 
+	"github.com/OoTMM/multiplayer/server/internal/config"
 	"github.com/OoTMM/multiplayer/server/internal/session"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 )
 
 type App struct {
 	ctx        context.Context
+	conf       *config.Config
 	listener   *net.TCPListener
 	sessions   map[[16]byte]*session.Session
 	sessionsMu sync.Mutex
@@ -23,8 +25,11 @@ func Run(ctx context.Context) error {
 		return err
 	}
 
+	conf := config.ParseConfig()
+
 	app := &App{
 		ctx:      ctx,
+		conf:     conf,
 		listener: listener,
 		sessions: make(map[[16]byte]*session.Session),
 	}
@@ -44,7 +49,7 @@ func (app *App) getSession(sessionID [16]byte, sessionSecret [8]byte) (*session.
 		return s, nil
 	}
 
-	session, err := session.OpenSession(app.ctx, sessionID, sessionSecret)
+	session, err := session.OpenSession(app.ctx, app.conf, sessionID, sessionSecret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open session: %v", err)
 	}

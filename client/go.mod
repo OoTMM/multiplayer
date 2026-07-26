@@ -3,5 +3,4 @@ module github.com/OoTMM/multiplayer/client
 go 1.25.7
 
 require golang.org/x/sys v0.10.0
-
-require github.com/spf13/pflag v1.0.10 // indirect
+require github.com/spf13/pflag v1.0.10

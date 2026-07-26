@@ -80,7 +80,7 @@ func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
 }
 
 func makeDataDir(prefix string, id []byte) (string, error) {
-	dataDir := fmt.Sprintf("%s/sessions/%02x/%030x", prefix, id[0:2], id[2:])
+	dataDir := fmt.Sprintf("%s/sessions/%02x/%030x", prefix, id[0], id[1:])
 	err := os.MkdirAll(dataDir, 0755)
 	if err != nil {
 		return "", err

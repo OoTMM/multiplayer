@@ -16,7 +16,7 @@ func ParseConfig() *Config {
 	var defaultDataDir string
 	confDir, err := os.UserConfigDir()
 	if err != nil {
-		defaultDataDir = "./data"
+		defaultDataDir = "./data/client"
 	} else {
 		defaultDataDir = confDir + "/OoTMM/client"
 	}

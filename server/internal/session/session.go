@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OoTMM/multiplayer/server/internal/config"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 	"github.com/OoTMM/multiplayer/shared/wal"
 )
@@ -36,14 +37,9 @@ type Player struct {
 	out      chan *protocol.Packet
 }
 
-func getDataPath(sessionID [16]byte) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current working directory: %v", err)
-	}
-
-	dataDir := fmt.Sprintf("%s/data/server/sessions/%02x/%030x", cwd, sessionID[0:2], sessionID[2:])
-	err = os.MkdirAll(dataDir, 0755)
+func getDataPath(prefix string, sessionID [16]byte) (string, error) {
+	dataDir := fmt.Sprintf("%s/sessions/%02x/%030x", prefix, sessionID[0], sessionID[1:])
+	err := os.MkdirAll(dataDir, 0755)
 	if err != nil {
 		return "", fmt.Errorf("failed to create data directory: %v", err)
 	}
@@ -51,8 +47,8 @@ func getDataPath(sessionID [16]byte) (string, error) {
 	return dataDir, nil
 }
 
-func OpenSession(ctx context.Context, sessionID [16]byte, sessionSecret [8]byte) (*Session, error) {
-	dataPath, err := getDataPath(sessionID)
+func OpenSession(ctx context.Context, conf *config.Config, sessionID [16]byte, sessionSecret [8]byte) (*Session, error) {
+	dataPath, err := getDataPath(conf.DataDir, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get data path: %v", err)
 	}
