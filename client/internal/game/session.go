@@ -292,6 +292,14 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		} else {
 			entry.Item.Nonce = 0
 		}
+	case wal.WalEvent:
+		event, err := ipc.ParseWalEvent(w.Data)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Received WAL event from player %s: %+v\n", p.PlayerName, event)
+		entry.Type = wal.WalEvent
+		entry.Event.ID = event.EventID
 	default:
 		return fmt.Errorf("unhandled WAL type: %d", w.Type)
 	}
