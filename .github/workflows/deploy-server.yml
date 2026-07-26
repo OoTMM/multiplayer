@@ -6,7 +6,10 @@ on:
       - master
 
 jobs:
-  ci:
+  deploy-server:
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
