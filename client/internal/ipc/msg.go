@@ -60,11 +60,15 @@ type MessageBodyWalIn struct {
 	Data  []byte
 }
 
-type MessageBodyWalQueryIn struct {
-	Index uint32
+type MessageBodyWalOut struct {
+	Index      uint32
+	Type       uint8
+	From       uint8
+	PlayerName [8]byte
+	Data       []byte
 }
 
-type WalItemIn struct {
+type WalItem struct {
 	To    uint8
 	Game  uint8
 	GI    uint16
@@ -72,20 +76,12 @@ type WalItemIn struct {
 	Key   uint32
 }
 
-type MessageBodyWalOut struct {
-	Type  uint8
-	Index uint32
-	Data  []byte
+type WalEvent struct {
+	EventID uint32
 }
 
-type WalItemOut struct {
-	From       uint8
-	To         uint8
-	Game       uint8
-	GI         uint16
-	Flags      uint16
-	Key        uint32
-	PlayerName [8]byte
+type MessageBodyWalQueryIn struct {
+	Index uint32
 }
 
 func ParseMessage(data []byte) (*Message, error) {
@@ -137,17 +133,26 @@ func ParseMessageBodyWalIn(data []byte) (*MessageBodyWalIn, error) {
 	return &body, nil
 }
 
-func ParseWalItemIn(data []byte) (*WalItemIn, error) {
+func ParseWalItem(data []byte) (*WalItem, error) {
 	if len(data) < 10 {
 		return nil, fmt.Errorf("WAL item too short")
 	}
-	var item WalItemIn
+	var item WalItem
 	item.To = data[0]
 	item.Game = data[1]
 	item.GI = binary.BigEndian.Uint16(data[2:4])
 	item.Flags = binary.BigEndian.Uint16(data[4:6])
 	item.Key = binary.BigEndian.Uint32(data[6:10])
 	return &item, nil
+}
+
+func ParseWalEvent(data []byte) (*WalEvent, error) {
+	if len(data) < 4 {
+		return nil, fmt.Errorf("WAL event too short")
+	}
+	var event WalEvent
+	event.EventID = binary.BigEndian.Uint32(data[0:4])
+	return &event, nil
 }
 
 func (msg *Message) Serialize() []byte {
@@ -167,22 +172,28 @@ func (body *MessageBodyHelloOut) Serialize() []byte {
 }
 
 func (body *MessageBodyWalOut) Serialize() []byte {
-	data := make([]byte, 5+len(body.Data))
+	data := make([]byte, 14+len(body.Data))
 	binary.BigEndian.PutUint32(data[0:4], body.Index)
 	data[4] = body.Type
-	copy(data[5:], body.Data)
+	data[5] = body.From
+	copy(data[6:14], body.PlayerName[:])
+	copy(data[14:], body.Data)
 	return data
 }
 
-func (item *WalItemOut) Serialize() []byte {
-	data := make([]byte, 19)
-	data[0] = item.From
-	data[1] = item.To
-	data[2] = item.Game
-	binary.BigEndian.PutUint16(data[3:5], item.GI)
-	binary.BigEndian.PutUint16(data[5:7], item.Flags)
-	binary.BigEndian.PutUint32(data[7:11], item.Key)
-	copy(data[11:19], item.PlayerName[:])
+func (item *WalItem) Serialize() []byte {
+	data := make([]byte, 10)
+	data[0] = item.To
+	data[1] = item.Game
+	binary.BigEndian.PutUint16(data[2:4], item.GI)
+	binary.BigEndian.PutUint16(data[4:6], item.Flags)
+	binary.BigEndian.PutUint32(data[6:10], item.Key)
+	return data
+}
+
+func (event *WalEvent) Serialize() []byte {
+	data := make([]byte, 4)
+	binary.BigEndian.PutUint32(data[0:4], event.EventID)
 	return data
 }
 

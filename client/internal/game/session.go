@@ -272,7 +272,7 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 
 	switch w.Type {
 	case wal.WalItem:
-		item, err := ipc.ParseWalItemIn(w.Data)
+		item, err := ipc.ParseWalItem(w.Data)
 		if err != nil {
 			return err
 		}
@@ -331,14 +331,17 @@ func (s *Session) sendGameWal(index uint32) error {
 		var data []byte
 		switch entry.Type {
 		case wal.WalItem:
-			body := ipc.WalItemOut{
-				From:       entry.From,
-				To:         entry.Item.To,
-				Game:       entry.Item.Game,
-				GI:         entry.Item.GI,
-				Flags:      entry.Item.Flags,
-				Key:        entry.Item.Key,
-				PlayerName: playerName,
+			body := ipc.WalItem{
+				To:    entry.Item.To,
+				Game:  entry.Item.Game,
+				GI:    entry.Item.GI,
+				Flags: entry.Item.Flags,
+				Key:   entry.Item.Key,
+			}
+			data = body.Serialize()
+		case wal.WalEvent:
+			body := ipc.WalEvent{
+				EventID: entry.Event.ID,
 			}
 			data = body.Serialize()
 		default:
@@ -346,9 +349,11 @@ func (s *Session) sendGameWal(index uint32) error {
 		}
 
 		wrapper := ipc.MessageBodyWalOut{
-			Type:  entry.Type,
-			Index: index + i,
-			Data:  data,
+			Index:      index + i,
+			Type:       entry.Type,
+			From:       entry.From,
+			PlayerName: playerName,
+			Data:       data,
 		}
 
 		msg := ipc.Message{
