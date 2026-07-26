@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -103,7 +104,9 @@ func (p *Player) handlePacket(pkt *protocol.Packet) error {
 		if err != nil {
 			return fmt.Errorf("failed to append WAL entry: %v", err)
 		}
-		fmt.Printf("Appended WAL entry: %+v\n", entry)
+
+		/* TODO: Enrich this quite critical log */
+		slog.Info("new WAL entry", "sessionId", hex.EncodeToString(p.Session.ID[:]), "playerId", hex.EncodeToString(p.ID[:]))
 
 		/* Ack the WAL entry */
 		dedupKey, err := entry.DedupKey()
@@ -146,7 +149,7 @@ func (p *Player) handlePackets() {
 		case pkt := <-p.in:
 			err := p.handlePacket(pkt)
 			if err != nil {
-				fmt.Println("Failed to handle packet:", err)
+				slog.Error("failed to handle packet", "error", err)
 				return
 			}
 		}
@@ -159,7 +162,7 @@ func (p *Player) handleMsgIn() {
 		pkt, err := protocol.RecvRawTimeoutDefault(p.Conn)
 		if err != nil {
 			if p.ctx.Err() == nil {
-				fmt.Println("Failed to receive packet:", err)
+				slog.Error("failed to receive packet", "error", err)
 			}
 			return
 		}
@@ -181,7 +184,7 @@ func (p *Player) handleMsgOut() {
 			err := protocol.SendRaw(p.Conn, pkt)
 			if err != nil {
 				if p.ctx.Err() == nil {
-					fmt.Println("Failed to send packet:", err)
+					slog.Error("failed to send packet", "error", err)
 				}
 				return
 			}
@@ -224,7 +227,7 @@ func (p *Player) handleWalStream() {
 		entry, index, err := stream.Next()
 		if err != nil {
 			if p.ctx.Err() == nil {
-				fmt.Println("Failed to get next WAL entry:", err)
+				slog.Error("failed to get next WAL entry", "error", err)
 			}
 			return
 		}
@@ -242,7 +245,7 @@ func (p *Player) handleWalStream() {
 		}
 		bodyData, err := body.Serialize()
 		if err != nil {
-			fmt.Println("Failed to serialize ServerWal:", err)
+			slog.Error("failed to serialize ServerWal", "error", err)
 			return
 		}
 
@@ -250,8 +253,6 @@ func (p *Player) handleWalStream() {
 			Op:   protocol.OpWal,
 			Data: bodyData,
 		})
-
-		fmt.Printf("Sent WAL entry to player: Index=%d, Entry=%+v\n", index, entry)
 	}
 }
 
@@ -285,7 +286,6 @@ func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, wal
 		}).Serialize(),
 	}
 	err := protocol.SendRaw(conn, pkt)
-	fmt.Printf("Sent hello packet to player: %+v\n", pkt)
 
 	if err == nil {
 		wg.Go(player.handleMsgIn)
@@ -295,7 +295,7 @@ func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, wal
 		wg.Go(player.handleNops)
 		<-ctx.Done()
 	} else {
-		fmt.Println("Failed to send hello packet:", err)
+		slog.Error("failed to send hello packet", "error", err)
 		cancel()
 	}
 

@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 
@@ -63,26 +65,26 @@ func (app *App) handleClient(conn *net.TCPConn) {
 	pkt, err := protocol.RecvRawTimeoutDefault(conn)
 	if err != nil {
 		if app.ctx.Err() == nil {
-			fmt.Println("Failed to receive packet:", err)
+			slog.Error("failed to receive packet", "error", err)
 		}
 		return
 	}
 
 	if pkt.Op != protocol.OpHello {
-		fmt.Printf("Unexpected operation code: %d\n", pkt.Op)
+		slog.Error("unexpected operation code", "op", pkt.Op)
 		return
 	}
 
 	hello, err := protocol.ParseClientHello(pkt.Data)
 	if err != nil {
-		fmt.Println("Failed to parse hello packet:", err)
+		slog.Error("failed to parse hello packet", "error", err)
 		return
 	}
 
-	fmt.Printf("Received hello from player %s (ID: %d, World: %d)\n", hello.PlayerName, hello.PlayerID, hello.WorldID)
+	slog.Info("received hello", "sessionId", hex.EncodeToString(hello.SessionID[:]), "playerId", hex.EncodeToString(hello.PlayerID[:]), "worldId", hello.WorldID, "walIndex", hello.WalIndex)
 	session, err := app.getSession(hello.SessionID, hello.SessionSecret)
 	if err != nil {
-		fmt.Println("Failed to get session:", err)
+		slog.Error("failed to get session", "error", err)
 		return
 	}
 
@@ -90,7 +92,7 @@ func (app *App) handleClient(conn *net.TCPConn) {
 }
 
 func (app *App) run() {
-	fmt.Println("Server started on", app.listener.Addr().String())
+	slog.Info("server started", "address", app.listener.Addr().String())
 
 	wg := sync.WaitGroup{}
 	wg.Go(func() {
@@ -106,7 +108,7 @@ func (app *App) run() {
 		conn, err := app.listener.AcceptTCP()
 		if err != nil {
 			if app.ctx.Err() == nil {
-				fmt.Println("Failed to accept connection:", err)
+				slog.Error("failed to accept connection", "error", err)
 			}
 			continue
 		}
