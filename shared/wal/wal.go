@@ -21,6 +21,7 @@ type WAL struct {
 }
 
 type WALStream struct {
+	ctx   context.Context
 	wal   *WAL
 	index uint32
 }
@@ -63,8 +64,8 @@ func (wal *WAL) load() error {
 	return nil
 }
 
-func OpenWAL(path string) (*WAL, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+func OpenWAL(ctx context.Context, path string) (*WAL, error) {
+	ctx, cancel := context.WithCancel(ctx)
 
 	/* Open the WAL file */
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
@@ -179,8 +180,9 @@ func (wal *WAL) Close() error {
 	return wal.file.Close()
 }
 
-func (wal *WAL) Subscribe(index uint32) *WALStream {
+func (wal *WAL) Subscribe(ctx context.Context, index uint32) *WALStream {
 	stream := &WALStream{
+		ctx:   ctx,
 		wal:   wal,
 		index: index,
 	}
@@ -206,6 +208,8 @@ func (stream *WALStream) Next() (*WalEntry, uint32, error) {
 		case <-ch:
 		case <-stream.wal.ctx.Done():
 			return nil, 0, fmt.Errorf("wal stream closed")
+		case <-stream.ctx.Done():
+			return nil, 0, fmt.Errorf("wal stream canceled")
 		}
 	}
 }

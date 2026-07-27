@@ -3,7 +3,9 @@ package session
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -20,6 +22,7 @@ type Session struct {
 	Secret       [8]byte
 	DataDir      string
 	ctx          context.Context
+	cancel       context.CancelFunc
 	players      map[*Player]struct{}
 	playersMutex sync.RWMutex
 	wal          *wal.WAL
@@ -49,13 +52,17 @@ func getDataPath(prefix string, sessionID [16]byte) (string, error) {
 }
 
 func OpenSession(ctx context.Context, conf *config.Config, sessionID [16]byte, sessionSecret [8]byte) (*Session, error) {
+	ctx, cancel := context.WithCancel(ctx)
+
 	dataPath, err := getDataPath(conf.DataDir, sessionID)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to get data path: %v", err)
 	}
 
-	wal, err := wal.OpenWAL(fmt.Sprintf("%s/wal.bin", dataPath))
+	wal, err := wal.OpenWAL(ctx, fmt.Sprintf("%s/wal.bin", dataPath))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to open WAL: %v", err)
 	}
 
@@ -64,6 +71,7 @@ func OpenSession(ctx context.Context, conf *config.Config, sessionID [16]byte, s
 		Secret:  sessionSecret,
 		DataDir: dataPath,
 		ctx:     ctx,
+		cancel:  cancel,
 		players: make(map[*Player]struct{}),
 		wal:     wal,
 	}
@@ -162,7 +170,11 @@ func (p *Player) handleMsgIn() {
 		pkt, err := protocol.RecvRawTimeoutDefault(p.Conn)
 		if err != nil {
 			if p.ctx.Err() == nil {
-				slog.Error("failed to receive packet", "error", err)
+				if errors.Is(err, io.EOF) {
+					slog.Info("client disconnected")
+				} else {
+					slog.Warn("unexpected disconnect", "error", err)
+				}
 			}
 			return
 		}
@@ -176,52 +188,39 @@ func (p *Player) handleMsgIn() {
 }
 
 func (p *Player) handleMsgOut() {
-	defer p.cancel()
-
-	for p.ctx.Err() == nil {
-		select {
-		case pkt := <-p.out:
-			err := protocol.SendRaw(p.Conn, pkt)
-			if err != nil {
-				if p.ctx.Err() == nil {
-					slog.Error("failed to send packet", "error", err)
-				}
-				return
-			}
-		case <-p.ctx.Done():
-			return
-		}
-	}
-}
-
-func (p *Player) handleNops() {
-	pkt := &protocol.Packet{
+	nopPacket := protocol.Packet{
 		Op:   protocol.OpNOP,
 		Data: []byte{},
 	}
+	nopInterval := 3 * time.Second
+	nopTimer := time.NewTimer(nopInterval)
 
+	defer nopTimer.Stop()
 	defer p.cancel()
-	tick := time.NewTicker(3 * time.Second)
-	defer tick.Stop()
 
-	for p.ctx.Err() == nil {
+	for {
+		var pkt *protocol.Packet
 		select {
-		case <-tick.C:
-			select {
-			default:
-			case p.out <- pkt:
-			case <-p.ctx.Done():
-				return
-			}
+		case pkt = <-p.out:
+		case <-nopTimer.C:
+			pkt = &nopPacket
 		case <-p.ctx.Done():
 			return
 		}
+
+		if err := protocol.SendRaw(p.Conn, pkt); err != nil {
+			if p.ctx.Err() == nil {
+				slog.Error("failed to send packet", "error", err)
+			}
+			return
+		}
+		nopTimer.Reset(nopInterval)
 	}
 }
 
 func (p *Player) handleWalStream() {
 	defer p.cancel()
-	stream := p.Session.wal.Subscribe(p.WalIndex)
+	stream := p.Session.wal.Subscribe(p.ctx, p.WalIndex)
 
 	for p.ctx.Err() == nil {
 		entry, index, err := stream.Next()
@@ -259,6 +258,7 @@ func (p *Player) handleWalStream() {
 func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, walIndex uint32, conn net.Conn) {
 	wg := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
 
 	player := &Player{
 		Session:  s,
@@ -277,6 +277,12 @@ func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, wal
 	s.players[player] = struct{}{}
 	s.playersMutex.Unlock()
 
+	defer func() {
+		s.playersMutex.Lock()
+		delete(s.players, player)
+		s.playersMutex.Unlock()
+	}()
+
 	/* Reply */
 	pkt := &protocol.Packet{
 		Op: protocol.OpHello,
@@ -287,23 +293,24 @@ func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, wal
 	}
 	err := protocol.SendRaw(conn, pkt)
 
-	if err == nil {
-		wg.Go(player.handleMsgIn)
-		wg.Go(player.handleMsgOut)
-		wg.Go(player.handlePackets)
-		wg.Go(player.handleWalStream)
-		wg.Go(player.handleNops)
-		<-ctx.Done()
-	} else {
+	if err != nil {
 		slog.Error("failed to send hello packet", "error", err)
-		cancel()
+		return
 	}
 
-	player.Conn.Close()
+	wg.Go(player.handleMsgIn)
+	wg.Go(player.handleMsgOut)
+	wg.Go(player.handlePackets)
+	wg.Go(player.handleWalStream)
 
-	s.playersMutex.Lock()
-	delete(s.players, player)
-	s.playersMutex.Unlock()
+	<-ctx.Done()
+	player.Conn.Close()
+	wg.Wait()
+}
+
+func (s *Session) Close() {
+	s.cancel()
+	s.wal.Close()
 }
 
 func (p *Player) Send(pkt *protocol.Packet) {

@@ -109,7 +109,7 @@ func Run(ctx context.Context, conf *config.Config, conn ipc.Conn, hello *ipc.Mes
 	}
 	defer sendQ.Close()
 
-	wal, err := wal.OpenWAL(fmt.Sprintf("%s/wal.bin", dataDir))
+	wal, err := wal.OpenWAL(ctx, fmt.Sprintf("%s/wal.bin", dataDir))
 	if err != nil {
 		fmt.Println("failed to open WAL:", err)
 		return
@@ -412,12 +412,16 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 }
 
 func (p *Session) Send(msg *ipc.Message) {
-	p.msgOut <- msg
+	select {
+	case p.msgOut <- msg:
+	case <-p.ctx.Done():
+	}
 }
 
 func (p *Session) TrySend(msg *ipc.Message) {
 	select {
 	case p.msgOut <- msg:
+	case <-p.ctx.Done():
 	default:
 	}
 }

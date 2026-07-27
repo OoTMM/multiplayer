@@ -13,6 +13,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
 	/* Run the application */
 	app.Run(ctx)
 }
