@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+cd client
+go tool go-winres make --arch amd64
+cd ..
+
 rm -rf build
 mkdir -p build
 
