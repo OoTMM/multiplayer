@@ -7,12 +7,13 @@ import (
 )
 
 type Config struct {
+	GamePatchPath  string
 	DataDir        string
 	UpstreamServer string
 	UpstreamPort   uint16
 }
 
-func ParseConfig() *Config {
+func ParseConfig(args []string) (*Config, error) {
 	var defaultDataDir string
 	confDir, err := os.UserConfigDir()
 	if err != nil {
@@ -22,11 +23,21 @@ func ParseConfig() *Config {
 	}
 
 	var conf Config
-	fs := flag.CommandLine
+	fs := flag.NewFlagSet("client", flag.ContinueOnError)
 	fs.StringVarP(&conf.DataDir, "data", "d", defaultDataDir, "Path to the data directory")
 	fs.StringVarP(&conf.UpstreamServer, "server", "s", "multi.ootmm.com", "Upstream server address")
 	fs.Uint16VarP(&conf.UpstreamPort, "port", "p", 14236, "Upstream server port")
-	fs.Parse(os.Args[1:])
+	err = fs.Parse(args)
+	if err != nil {
+		return nil, err
+	}
 
-	return &conf
+	posArgs := fs.Args()
+	if len(posArgs) == 1 {
+		conf.GamePatchPath = posArgs[0]
+	} else {
+		/* Return some error? */
+	}
+
+	return &conf, nil
 }

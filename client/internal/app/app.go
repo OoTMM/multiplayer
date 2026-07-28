@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
@@ -16,7 +17,12 @@ type App struct {
 }
 
 func Run(ctx context.Context) {
-	conf := config.ParseConfig()
+	conf, err := config.ParseConfig(os.Args[1:])
+	if err != nil {
+		fmt.Println("Failed to parse config:", err)
+		return
+	}
+
 	app := &App{
 		conf: conf,
 		ctx:  ctx,
