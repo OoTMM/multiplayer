@@ -45,7 +45,6 @@ type MessageBodyHelloIn struct {
 	PlayerID      [16]byte
 	PlayerName    [8]byte
 	WorldID       uint8
-	Multiplayer   bool
 }
 
 type MessageBodyHelloOut struct {
@@ -108,7 +107,7 @@ func ParseMessageBodyPositionIn(data []byte) (*MessageBodyPositionIn, error) {
 }
 
 func ParseMessageBodyHelloIn(data []byte) (*MessageBodyHelloIn, error) {
-	if len(data) < 58 {
+	if len(data) < 57 {
 		return nil, fmt.Errorf("message body too short for HELLO_IN")
 	}
 	var body MessageBodyHelloIn
@@ -118,7 +117,6 @@ func ParseMessageBodyHelloIn(data []byte) (*MessageBodyHelloIn, error) {
 	copy(body.PlayerID[:], data[32:48])
 	copy(body.PlayerName[:], data[48:56])
 	body.WorldID = data[56]
-	body.Multiplayer = (data[57] != 0)
 	return &body, nil
 }
 

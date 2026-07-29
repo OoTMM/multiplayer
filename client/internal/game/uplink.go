@@ -96,11 +96,11 @@ func (u *Uplink) handshake() error {
 	helloData := &protocol.ClientHello{
 		Magic:         [8]byte{'O', 'o', 'T', 'M', 'M', 0x7f, 0x01, 0x00},
 		Version:       0x00010000,
-		SessionID:     u.session.SessionID,
-		SessionSecret: u.session.SessionSecret,
+		SessionID:     u.session.Info.SessionID,
+		SessionSecret: u.session.Info.SessionSecret,
+		WorldID:       u.session.Info.WorldID,
 		PlayerID:      u.session.PlayerID,
 		PlayerName:    u.session.PlayerName,
-		WorldID:       u.session.WorldID,
 		WalIndex:      u.session.wal.Count(),
 	}
 

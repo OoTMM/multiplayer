@@ -16,25 +16,23 @@ import (
 )
 
 type Session struct {
-	Conf          *config.Config
-	Conn          ipc.Conn
-	SessionID     [16]byte
-	SessionSecret [8]byte
-	PlayerID      [16]byte
-	PlayerName    [8]byte
-	WorldID       uint8
-	SeqGame       uint32
-	SeqNet        uint32
-	msgIn         chan *ipc.Message
-	msgOut        chan *ipc.Message
-	uplinkIn      chan *protocol.Packet
-	uplinkOut     chan *protocol.Packet
-	ctx           context.Context
-	cancel        context.CancelFunc
-	muHello       sync.Mutex
-	dataDir       string
-	sendQ         *SendQueue
-	wal           *wal.WAL
+	Conf       *config.Config
+	Info       *Info
+	Conn       ipc.Conn
+	PlayerID   [16]byte
+	PlayerName [8]byte
+	SeqGame    uint32
+	SeqNet     uint32
+	msgIn      chan *ipc.Message
+	msgOut     chan *ipc.Message
+	uplinkIn   chan *protocol.Packet
+	uplinkOut  chan *protocol.Packet
+	ctx        context.Context
+	cancel     context.CancelFunc
+	muHello    sync.Mutex
+	dataDir    string
+	sendQ      *SendQueue
+	wal        *wal.WAL
 
 	positions *PositionSystem
 }
@@ -88,10 +86,20 @@ func makeDataDir(prefix string, id []byte) (string, error) {
 	return dataDir, nil
 }
 
-func Run(ctx context.Context, conf *config.Config, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
+func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if hello.SessionID != info.SessionID || hello.SessionSecret != info.SessionSecret {
+		fmt.Println("Session mismatch between game and patchfile")
+		return
+	}
+
+	if hello.WorldID != info.WorldID {
+		fmt.Println("World ID mismatch between game and patchfile")
+		return
+	}
 
 	dataDir, err := makeDataDir(conf.DataDir, hello.SessionID[:])
 	if err != nil {
@@ -100,7 +108,7 @@ func Run(ctx context.Context, conf *config.Config, conn ipc.Conn, hello *ipc.Mes
 	}
 
 	var sendQ *SendQueue
-	if hello.Multiplayer {
+	if info.Mode != InfoModeSingle {
 		sendQ, err = OpenSendQueue(fmt.Sprintf("%s/send_queue.dat", dataDir))
 		if err != nil {
 			fmt.Println("failed to open send queue:", err)
@@ -124,24 +132,22 @@ func Run(ctx context.Context, conf *config.Config, conn ipc.Conn, hello *ipc.Mes
 	seqNet := binary.LittleEndian.Uint32(randBytes[4:8])
 
 	session := &Session{
-		Conf:          conf,
-		Conn:          conn,
-		SessionID:     hello.SessionID,
-		SessionSecret: hello.SessionSecret,
-		PlayerID:      hello.PlayerID,
-		PlayerName:    hello.PlayerName,
-		WorldID:       hello.WorldID,
-		SeqGame:       seqGame,
-		SeqNet:        seqNet,
-		msgIn:         make(chan *ipc.Message, 16),
-		msgOut:        make(chan *ipc.Message, 16),
-		ctx:           ctx,
-		cancel:        cancel,
-		uplinkIn:      make(chan *protocol.Packet, 16),
-		uplinkOut:     make(chan *protocol.Packet, 16),
-		dataDir:       dataDir,
-		sendQ:         sendQ,
-		wal:           wal,
+		Conf:       conf,
+		Info:       info,
+		Conn:       conn,
+		PlayerID:   hello.PlayerID,
+		PlayerName: hello.PlayerName,
+		SeqGame:    seqGame,
+		SeqNet:     seqNet,
+		msgIn:      make(chan *ipc.Message, 16),
+		msgOut:     make(chan *ipc.Message, 16),
+		ctx:        ctx,
+		cancel:     cancel,
+		uplinkIn:   make(chan *protocol.Packet, 16),
+		uplinkOut:  make(chan *protocol.Packet, 16),
+		dataDir:    dataDir,
+		sendQ:      sendQ,
+		wal:        wal,
 	}
 
 	/* Queue the HELLO OUT message */
@@ -165,8 +171,11 @@ func Run(ctx context.Context, conf *config.Config, conn ipc.Conn, hello *ipc.Mes
 	wg.Go(session.handleMsgIn)
 	wg.Go(session.handleMsgOut)
 	wg.Go(session.handleMsgLoop)
-	wg.Go(session.handleUplink)
-	wg.Go(session.handleSendQueue)
+
+	if session.Info.Mode != InfoModeSingle {
+		wg.Go(session.handleUplink)
+		wg.Go(session.handleSendQueue)
+	}
 
 	/* Wait for cancellation */
 	<-session.ctx.Done()
@@ -268,7 +277,7 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 
 	copy(entry.PlayerID[:], p.PlayerID[:])
 	copy(entry.PlayerName[:], p.PlayerName[:])
-	entry.From = p.WorldID
+	entry.From = p.Info.WorldID
 
 	switch w.Type {
 	case wal.WalItem:
@@ -395,7 +404,11 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		if err != nil {
 			return err
 		}
-		return p.handleWalIn(walMsg)
+
+		if p.Info.Mode != InfoModeSingle {
+			err = p.handleWalIn(walMsg)
+		}
+		return err
 	case ipc.OpWalQuery:
 		index := binary.BigEndian.Uint32(msg.Payload)
 		return p.sendGameWal(index)
@@ -404,7 +417,10 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		if err != nil {
 			return err
 		}
-		p.positions.OnGamePos(posMsg)
+
+		if p.Info.Mode != InfoModeSingle {
+			p.positions.OnGamePos(posMsg)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unhandled message opcode: %d", msg.Op)

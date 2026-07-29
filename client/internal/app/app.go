@@ -3,32 +3,55 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
 	"github.com/OoTMM/multiplayer/client/internal/game"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
+	"github.com/fatih/color"
 )
 
 type App struct {
+	info *game.Info
 	conf *config.Config
 	ctx  context.Context
 }
 
-func Run(ctx context.Context) {
-	conf, err := config.ParseConfig(os.Args[1:])
+func Run(ctx context.Context, conf *config.Config) error {
+	info, err := game.ExtractGameInfo(conf)
 	if err != nil {
-		fmt.Println("Failed to parse config:", err)
-		return
+		return fmt.Errorf("failed to extract game info: %w", err)
 	}
 
 	app := &App{
+		info: info,
 		conf: conf,
 		ctx:  ctx,
 	}
 
+	app.displayInfo()
 	app.loop()
+	return nil
+}
+
+func (app *App) displayInfo() {
+	var modeStr string
+
+	switch app.info.Mode {
+	case game.InfoModeSingle:
+		modeStr = "Single Player"
+	case game.InfoModeCoop:
+		modeStr = "Co-op"
+	case game.InfoModeMulti:
+		modeStr = "Multiplayer"
+	default:
+		modeStr = "Unknown"
+	}
+
+	star := color.BlueString(" * ")
+	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "Session ID: ")), color.HiCyanString("%x", app.info.SessionID))
+	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "World ID: ")), color.HiCyanString("%x", app.info.WorldID))
+	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "Mode: ")), color.HiCyanString("%s", modeStr))
 }
 
 func (app *App) hello(conn ipc.Conn) *ipc.MessageBodyHelloIn {
@@ -96,7 +119,7 @@ func (app *App) loop() {
 		}
 		conn, hello := app.poll()
 		if conn != nil && hello != nil {
-			game.Run(app.ctx, app.conf, conn, hello)
+			game.Run(app.ctx, app.conf, app.info, conn, hello)
 		} else {
 			select {
 			case <-app.ctx.Done():

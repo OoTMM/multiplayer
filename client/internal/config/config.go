@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	flag "github.com/spf13/pflag"
@@ -36,7 +37,7 @@ func ParseConfig(args []string) (*Config, error) {
 	if len(posArgs) == 1 {
 		conf.GamePatchPath = posArgs[0]
 	} else {
-		/* Return some error? */
+		return nil, fmt.Errorf("expected exactly one positional argument (path to game patch), got %d", len(posArgs))
 	}
 
 	return &conf, nil

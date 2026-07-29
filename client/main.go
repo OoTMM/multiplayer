@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 
 	"github.com/OoTMM/multiplayer/client/internal/app"
+	"github.com/OoTMM/multiplayer/client/internal/config"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -67,6 +69,13 @@ func registerFileAssociation() {
 func main() {
 	registerFileAssociation()
 
+	conf, err := config.ParseConfig(os.Args[1:])
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		os.Exit(1)
+		return
+	}
+
 	/* Create a new context with signal handling */
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -77,5 +86,9 @@ func main() {
 	}()
 
 	/* Run the application */
-	app.Run(ctx)
+	err = app.Run(ctx, conf)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
 }
