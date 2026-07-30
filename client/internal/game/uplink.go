@@ -131,7 +131,7 @@ func (u *Uplink) handshake() error {
 	if binary.LittleEndian.Uint32(pkt.Data[8:12]) != 0x00010000 {
 		return fmt.Errorf("invalid version in server hello")
 	}
-	fmt.Println("Received server hello packet")
+	fmt.Printf("Connected to server %s:%d\n", u.session.Conf.UpstreamServer, u.session.Conf.UpstreamPort)
 	return nil
 }
 

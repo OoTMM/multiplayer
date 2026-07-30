@@ -52,44 +52,38 @@ func (app *App) displayInfo() {
 	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "Session ID: ")), color.HiCyanString("%x", app.info.SessionID))
 	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "World ID: ")), color.HiCyanString("%x", app.info.WorldID))
 	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "Mode: ")), color.HiCyanString("%s", modeStr))
+	fmt.Printf("\n")
 }
 
-func (app *App) hello(conn ipc.Conn) *ipc.MessageBodyHelloIn {
+func (app *App) hello(conn ipc.Conn) (*ipc.MessageBodyHelloIn, error) {
 	raw, err := conn.Read()
 	if err != nil {
-		fmt.Println("Failed to read from connection:", err)
-		return nil
+		return nil, fmt.Errorf("failed to read from connection: %w", err)
 	}
 
-	fmt.Printf("Received message: %x\n", raw)
 	msg, err := ipc.ParseMessage(raw)
 	if err != nil {
-		fmt.Println("Failed to parse message:", err)
-		return nil
+		return nil, fmt.Errorf("failed to parse message: %w", err)
 	}
 
 	if msg.Op != ipc.OpHello {
-		fmt.Printf("Unexpected operation code: %d\n", msg.Op)
-		return nil
+		return nil, fmt.Errorf("unexpected operation code: %d", msg.Op)
 	}
 
 	if msg.Seq != 0 {
-		fmt.Printf("Unexpected sequence number: %d\n", msg.Seq)
-		return nil
+		return nil, fmt.Errorf("unexpected sequence number: %d", msg.Seq)
 	}
 
 	hello, err := ipc.ParseMessageBodyHelloIn(msg.Payload)
 	if err != nil {
-		fmt.Println("Failed to parse HELLO_IN message body:", err)
-		return nil
+		return nil, fmt.Errorf("failed to parse HELLO_IN message body: %w", err)
 	}
 
 	if string(hello.Magic[:]) != "OoTMM\x7f\x01\x00" {
-		fmt.Printf("Unexpected magic: %x\n", hello.Magic)
-		return nil
+		return nil, fmt.Errorf("unexpected magic: %x", hello.Magic)
 	}
 
-	return hello
+	return hello, nil
 }
 
 func (app *App) poll() (ipc.Conn, *ipc.MessageBodyHelloIn) {
@@ -101,18 +95,20 @@ func (app *App) poll() (ipc.Conn, *ipc.MessageBodyHelloIn) {
 			fmt.Println("Failed to open connection:", err)
 			continue
 		}
-		hello := app.hello(conn)
-		if hello != nil {
-			return conn, hello
+		hello, err := app.hello(conn)
+		if err != nil {
+			fmt.Println("Failed to read HELLO message:", err)
+			conn.Close()
+			continue
 		}
-		conn.Close()
+		return conn, hello
 	}
 
 	return nil, nil
 }
 
 func (app *App) loop() {
-	fmt.Println("Client started")
+	fmt.Println("Waiting for Project64 to connect...")
 	for {
 		if app.ctx.Err() != nil {
 			break
@@ -128,5 +124,4 @@ func (app *App) loop() {
 			}
 		}
 	}
-	fmt.Println("Client stopped")
 }

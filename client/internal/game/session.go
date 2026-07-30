@@ -56,7 +56,15 @@ func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
 			return fmt.Errorf("failed to compute deduplication key: %v", err)
 		}
 		s.sendQ.Ack(dedupKey)
-		fmt.Printf("Received WAL entry from uplink: %+v\n", body.Entry)
+
+		switch body.Entry.Type {
+		case wal.WalItem:
+			fmt.Printf("Server: Item (PlayerID=%032x, PlayerName=%s, From=%d, To=%d, Game=%d, GI=%d, Flags=%04x, Key=%08x)\n", body.Entry.PlayerID, body.Entry.PlayerName, body.Entry.From, body.Entry.Item.To, body.Entry.Item.Game, body.Entry.Item.GI, body.Entry.Item.Flags, body.Entry.Item.Key)
+		case wal.WalEvent:
+			fmt.Printf("Server: Event (PlayerID=%032x, PlayerName=%s, From=%d, EventID=%08x)\n", body.Entry.PlayerID, body.Entry.PlayerName, body.Entry.From, body.Entry.Event.ID)
+		default:
+			fmt.Printf("Server: Unknown: %+v\n", body.Entry)
+		}
 	case protocol.OpWalAck:
 		if len(pkt.Data) != 16 {
 			return fmt.Errorf("invalid WAL ACK packet length: %d", len(pkt.Data))
@@ -123,6 +131,9 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 		return
 	}
 	defer wal.Close()
+
+	/* Display the connection notification */
+	fmt.Printf("Game connected (PlayerID=%032x, PlayerName=%s)\n", hello.PlayerID, hello.PlayerName)
 
 	/* Generate random sequence numbers */
 	randBytes := make([]byte, 8)
@@ -285,7 +296,8 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Received WAL item from player %s: %+v\n", p.PlayerName, item)
+		fmt.Printf("Game: Item (To=%d, Game=%d, GI=%d, Flags=%04x, Key=%08x)\n", item.To, item.Game, item.GI, item.Flags, item.Key)
+
 		entry.Type = wal.WalItem
 		entry.Item.To = item.To
 		entry.Item.Game = item.Game
@@ -306,7 +318,7 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Received WAL event from player %s: %+v\n", p.PlayerName, event)
+		fmt.Printf("Game: Event (ID=%08x)\n", event.EventID)
 		entry.Type = wal.WalEvent
 		entry.Event.ID = event.EventID
 	default:
@@ -326,7 +338,6 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		Payload: payload[:],
 	}
 	p.Send(&ackMsg)
-	fmt.Printf("sent ACK: %+v", ackMsg)
 
 	return nil
 }

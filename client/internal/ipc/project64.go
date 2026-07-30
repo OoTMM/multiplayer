@@ -2,11 +2,8 @@ package ipc
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
-	"sync"
-	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -63,48 +60,6 @@ func PollProject64(ctx context.Context) []ConnFactory {
 		factories = append(factories, &PJ64ConnFactory{path: pipe})
 	}
 	return factories
-}
-
-func ServePJ64(ctx context.Context, cb func(conn Conn)) error {
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	active := make(map[string]struct{})
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			wg.Wait()
-			return nil
-		case <-ticker.C:
-			pipes := listPipes()
-			mu.Lock()
-			for _, pipe := range pipes {
-				if _, ok := active[pipe]; ok {
-					continue
-				}
-				fmt.Println("Found new pipe:", pipe)
-				conn, err := newPJ64Conn(pipe)
-				if err != nil {
-					fmt.Println("Failed to connect to pipe:", err)
-					continue
-				}
-				active[pipe] = struct{}{}
-				wg.Go(func() {
-					fmt.Println("There is a new pipe!")
-					cb(conn)
-					<-ctx.Done()
-					conn.Close()
-					mu.Lock()
-					delete(active, conn.path)
-					mu.Unlock()
-				})
-			}
-			mu.Unlock()
-		}
-	}
 }
 
 func (conn *PJ64Conn) Close() {
