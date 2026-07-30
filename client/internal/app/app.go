@@ -8,6 +8,7 @@ import (
 	"github.com/OoTMM/multiplayer/client/internal/config"
 	"github.com/OoTMM/multiplayer/client/internal/game"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
+	"github.com/OoTMM/multiplayer/shared/version"
 	"github.com/fatih/color"
 )
 
@@ -48,6 +49,7 @@ func (app *App) displayInfo() {
 		modeStr = "Unknown"
 	}
 
+	color.HiWhite("OoTMM Client - %s\n\n", version.Version)
 	star := color.BlueString(" * ")
 	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "Session ID: ")), color.HiCyanString("%x", app.info.SessionID))
 	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "World ID: ")), color.HiCyanString("%x", app.info.WorldID))
