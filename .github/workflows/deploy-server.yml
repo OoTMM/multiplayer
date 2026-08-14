@@ -2,8 +2,8 @@ name: Server Continuous Deployment Workflow
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - 'master'
 
 jobs:
   publish:
