@@ -78,6 +78,7 @@ func OpenSession(ctx context.Context, conf *config.Config, sessionID [16]byte, s
 		cancel:  cancel,
 		players: make(map[*Player]struct{}),
 		wal:     wal,
+		sink:    sink,
 	}
 
 	return session, nil
