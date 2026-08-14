@@ -11,7 +11,7 @@ import (
 
 type EventNATS struct {
 	subject string
-	data    *any
+	data    any
 }
 
 type SinkNATS struct {
@@ -95,7 +95,7 @@ func (s *SinkNATS) publish(conn *nats.Conn, event *EventNATS) error {
 func (s *SinkNATS) Send(subject string, event any) error {
 	ev := EventNATS{
 		subject: subject,
-		data:    &event,
+		data:    event,
 	}
 
 	select {

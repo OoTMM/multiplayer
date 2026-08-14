@@ -9,10 +9,12 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/OoTMM/multiplayer/server/internal/config"
+	"github.com/OoTMM/multiplayer/server/internal/events"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 	"github.com/OoTMM/multiplayer/shared/wal"
 )
@@ -26,19 +28,21 @@ type Session struct {
 	players      map[*Player]struct{}
 	playersMutex sync.RWMutex
 	wal          *wal.WAL
+	sink         events.Sink
 }
 
 type Player struct {
-	Session  *Session
-	ID       [16]byte
-	Name     [8]byte
-	WorldID  uint8
-	WalIndex uint32
-	Conn     net.Conn
-	ctx      context.Context
-	cancel   context.CancelFunc
-	in       chan *protocol.Packet
-	out      chan *protocol.Packet
+	Session     *Session
+	ID          [16]byte
+	Name        [8]byte
+	WorldID     uint8
+	WalIndex    uint32
+	LastPosTime time.Time
+	Conn        net.Conn
+	ctx         context.Context
+	cancel      context.CancelFunc
+	in          chan *protocol.Packet
+	out         chan *protocol.Packet
 }
 
 func getDataPath(prefix string, sessionID [16]byte) (string, error) {
@@ -51,7 +55,7 @@ func getDataPath(prefix string, sessionID [16]byte) (string, error) {
 	return dataDir, nil
 }
 
-func OpenSession(ctx context.Context, conf *config.Config, sessionID [16]byte, sessionSecret [8]byte) (*Session, error) {
+func OpenSession(ctx context.Context, conf *config.Config, sessionID [16]byte, sessionSecret [8]byte, sink events.Sink) (*Session, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	dataPath, err := getDataPath(conf.DataDir, sessionID)
@@ -99,6 +103,54 @@ func (s *Session) Broadcast(pkt *protocol.Packet) {
 	s.BroadcastExcept(pkt, nil)
 }
 
+func (p *Player) handlePositionUpdate(pos *protocol.ClientPosition) {
+	/* Server broadcast */
+	body := &protocol.ServerPosition{
+		ID:   p.ID,
+		Name: p.Name,
+		Key:  pos.Key,
+		X:    pos.X,
+		Y:    pos.Y,
+		Z:    pos.Z,
+	}
+	p.Session.BroadcastExcept(&protocol.Packet{
+		Op:   protocol.OpPosition,
+		Data: body.Serialize(),
+	}, p)
+
+	/* Event sink */
+	if p.LastPosTime.IsZero() || time.Since(p.LastPosTime) >= 250*time.Millisecond {
+		p.LastPosTime = time.Now()
+
+		var eventPosition struct {
+			Event      string `json:"event"`
+			SessionID  string `json:"sessionId"`
+			PlayerID   string `json:"playerId"`
+			WorldID    uint8  `json:"worldId"`
+			PlayerName string `json:"playerName"`
+			Key        uint16 `json:"key"`
+			X          int16  `json:"x"`
+			Y          int16  `json:"y"`
+			Z          int16  `json:"z"`
+		}
+
+		eventPosition.Event = "position"
+		eventPosition.SessionID = hex.EncodeToString(p.Session.ID[:])
+		eventPosition.PlayerID = hex.EncodeToString(p.ID[:])
+		eventPosition.WorldID = p.WorldID
+		eventPosition.PlayerName = strings.TrimRight(string(p.Name[:]), "\x00")
+		eventPosition.Key = pos.Key
+		eventPosition.X = pos.X
+		eventPosition.Y = pos.Y
+		eventPosition.Z = pos.Z
+
+		err := p.Session.sink.Send(fmt.Sprintf("ootmm.events.multi.%032x", eventPosition.SessionID[:]), &eventPosition)
+		if err != nil {
+			slog.Error("failed to send position event", "error", err)
+		}
+	}
+}
+
 func (p *Player) handlePacket(pkt *protocol.Packet) error {
 	switch pkt.Op {
 	case protocol.OpNOP:
@@ -130,18 +182,7 @@ func (p *Player) handlePacket(pkt *protocol.Packet) error {
 		if err != nil {
 			return fmt.Errorf("failed to parse client position: %v", err)
 		}
-		body := &protocol.ServerPosition{
-			ID:   p.ID,
-			Name: p.Name,
-			Key:  pos.Key,
-			X:    pos.X,
-			Y:    pos.Y,
-			Z:    pos.Z,
-		}
-		p.Session.BroadcastExcept(&protocol.Packet{
-			Op:   protocol.OpPosition,
-			Data: body.Serialize(),
-		}, p)
+		p.handlePositionUpdate(pos)
 	default:
 		slog.Warn("Unhandled packet opcode", "op", pkt.Op)
 	}

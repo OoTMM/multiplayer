@@ -62,7 +62,7 @@ func (app *App) acquireSession(sessionID [16]byte, sessionSecret [8]byte) (*sess
 		return appS.session, nil
 	}
 
-	session, err := session.OpenSession(app.ctx, app.conf, sessionID, sessionSecret)
+	session, err := session.OpenSession(app.ctx, app.conf, sessionID, sessionSecret, app.sink)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open session: %v", err)
 	}
