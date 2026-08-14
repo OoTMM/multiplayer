@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/OoTMM/multiplayer/server/internal/config"
+	"github.com/OoTMM/multiplayer/server/internal/events"
 	"github.com/OoTMM/multiplayer/server/internal/session"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 )
@@ -24,6 +25,7 @@ type App struct {
 	listener   *net.TCPListener
 	sessions   map[[16]byte]*appSession
 	sessionsMu sync.Mutex
+	sink       events.Sink
 }
 
 func Run(ctx context.Context) error {
@@ -33,12 +35,15 @@ func Run(ctx context.Context) error {
 	}
 
 	conf := config.ParseConfig()
+	sink := events.NewSink(conf)
+	defer sink.Close()
 
 	app := &App{
 		ctx:      ctx,
 		conf:     conf,
 		listener: listener,
 		sessions: make(map[[16]byte]*appSession),
+		sink:     sink,
 	}
 
 	app.run()
