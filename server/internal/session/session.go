@@ -145,7 +145,7 @@ func (p *Player) handlePositionUpdate(pos *protocol.ClientPosition) {
 		eventPosition.Y = pos.Y
 		eventPosition.Z = pos.Z
 
-		err := p.Session.sink.Send(fmt.Sprintf("ootmm.events.multi.%032x", eventPosition.SessionID[:]), &eventPosition)
+		err := p.Session.sink.Send(fmt.Sprintf("ootmm.events.multi.%s", eventPosition.SessionID[:]), &eventPosition)
 		if err != nil {
 			slog.Error("failed to send position event", "error", err)
 		}
