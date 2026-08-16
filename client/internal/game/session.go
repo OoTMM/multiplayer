@@ -49,6 +49,9 @@ func (s *Session) handleUplinkPacket(pkt *protocol.Packet) error {
 
 		/* Append to the WAL */
 		err = s.wal.Append(body.Entry)
+		if err != nil {
+			return fmt.Errorf("failed to append WAL entry: %v", err)
+		}
 
 		/* Clear the send queue */
 		dedupKey, err := body.Entry.DedupKey()
