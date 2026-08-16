@@ -23,7 +23,7 @@ func listPipes() []string {
 	pipes := make([]string, 0)
 	entries, err := os.ReadDir(`\\.\pipe\`)
 	if err != nil {
-		panic(err)
+		return pipes
 	}
 	for _, entry := range entries {
 		name := entry.Name()
