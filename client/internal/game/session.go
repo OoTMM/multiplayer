@@ -122,8 +122,8 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 			fmt.Println("failed to open send queue:", err)
 			return
 		}
+		defer sendQ.Close()
 	}
-	defer sendQ.Close()
 
 	wal, err := wal.OpenWAL(ctx, fmt.Sprintf("%s/wal.bin", dataDir))
 	if err != nil {
