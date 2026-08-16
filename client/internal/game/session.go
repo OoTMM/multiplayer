@@ -421,6 +421,9 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		}
 		return err
 	case ipc.OpWalQuery:
+		if len(msg.Payload) < 4 {
+			return fmt.Errorf("WAL_QUERY message too short")
+		}
 		index := binary.BigEndian.Uint32(msg.Payload)
 		return p.sendGameWal(index)
 	case ipc.OpPosition:
