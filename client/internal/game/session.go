@@ -320,7 +320,7 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		fmt.Printf("Game: Item (To=%d, Game=%d, GI=%d, Flags=%04x, Key=%08x)\n", item.To, item.Game, item.GI, item.Flags, item.Key)
 
 		/* Send the event */
-		p.Events.Emit("GAME_ITEM", "gi", fmt.Sprintf("%d", item.GI))
+		p.Events.Emit("GAME_ITEM", "gi", item.GI)
 
 		entry.Type = wal.WalItem
 		entry.Item.To = item.To
