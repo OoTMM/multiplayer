@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
+	"github.com/OoTMM/multiplayer/client/internal/events"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 	"github.com/OoTMM/multiplayer/shared/wal"
@@ -17,6 +20,7 @@ import (
 
 type Session struct {
 	Conf       *config.Config
+	Events     *events.EventSink
 	Info       *Info
 	Conn       ipc.Conn
 	PlayerID   [16]byte
@@ -97,7 +101,7 @@ func makeDataDir(prefix string, id []byte) (string, error) {
 	return dataDir, nil
 }
 
-func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
+func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, hello *ipc.MessageBodyHelloIn, events *events.EventSink) {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -147,6 +151,7 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 
 	session := &Session{
 		Conf:       conf,
+		Events:     events,
 		Info:       info,
 		Conn:       conn,
 		PlayerID:   hello.PlayerID,
@@ -191,11 +196,22 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 		wg.Go(session.handleSendQueue)
 	}
 
+	/* Log a game start event */
+	events.Emit("GAME_START",
+		"sessionId", hex.EncodeToString(session.Info.SessionID[:]),
+		"playerId", hex.EncodeToString(session.PlayerID[:]),
+		"playerName", strings.TrimRight(string(session.PlayerName[:]), "\x00"),
+		"worldId", fmt.Sprintf("%d", session.Info.WorldID),
+	)
+
 	/* Wait for cancellation */
 	<-session.ctx.Done()
 	session.positions.Close()
 	session.Conn.Close()
 	wg.Wait()
+
+	/* Log a game end event */
+	events.Emit("GAME_END")
 
 	fmt.Println("Session closed")
 }
@@ -299,7 +315,12 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		if err != nil {
 			return err
 		}
+
+		/* Log */
 		fmt.Printf("Game: Item (To=%d, Game=%d, GI=%d, Flags=%04x, Key=%08x)\n", item.To, item.Game, item.GI, item.Flags, item.Key)
+
+		/* Send the event */
+		p.Events.Emit("GAME_ITEM", "gi", fmt.Sprintf("%d", item.GI))
 
 		entry.Type = wal.WalItem
 		entry.Item.To = item.To

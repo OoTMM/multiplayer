@@ -130,7 +130,7 @@ func (app *App) loop() {
 		}
 		conn, hello := app.poll()
 		if conn != nil && hello != nil {
-			game.Run(app.ctx, app.conf, app.info, conn, hello)
+			game.Run(app.ctx, app.conf, app.info, conn, hello, app.events)
 		} else {
 			select {
 			case <-app.ctx.Done():
