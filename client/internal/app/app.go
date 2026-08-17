@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
+	"github.com/OoTMM/multiplayer/client/internal/events"
 	"github.com/OoTMM/multiplayer/client/internal/game"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/version"
@@ -13,9 +14,10 @@ import (
 )
 
 type App struct {
-	info *game.Info
-	conf *config.Config
-	ctx  context.Context
+	info   *game.Info
+	conf   *config.Config
+	ctx    context.Context
+	events *events.EventSink
 }
 
 func Run(ctx context.Context, conf *config.Config) error {
@@ -24,10 +26,17 @@ func Run(ctx context.Context, conf *config.Config) error {
 		return fmt.Errorf("failed to extract game info: %w", err)
 	}
 
+	events, err := events.NewEventSink(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create event sink: %w", err)
+	}
+	defer events.Close()
+
 	app := &App{
-		info: info,
-		conf: conf,
-		ctx:  ctx,
+		info:   info,
+		conf:   conf,
+		ctx:    ctx,
+		events: events,
 	}
 
 	app.displayInfo()
