@@ -1,5 +1,3 @@
-//go:build !windows
-
 package ipc
 
 import (
@@ -22,12 +20,7 @@ type UnixConnFactory struct {
 
 func listSockets() []string {
 	paths := make([]string, 0)
-	rt_dir := os.Getenv("XDG_RUNTIME_DIR")
-	if rt_dir == "" {
-		panic("XDG_RUNTIME_DIR is not set")
-	}
-
-	dir := rt_dir + "/n64-ipc"
+	dir := getRuntimeDir() + "/n64-ipc"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return paths
@@ -52,7 +45,7 @@ func newUnixConn(path string) (*UnixConn, error) {
 	return &UnixConn{conn: conn}, nil
 }
 
-func Poll(ctx context.Context) []ConnFactory {
+func PollUnix(ctx context.Context) []ConnFactory {
 	sockets := listSockets()
 	factories := make([]ConnFactory, 0, len(sockets))
 	for _, socket := range sockets {
