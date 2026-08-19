@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
@@ -90,7 +92,7 @@ func (app *App) hello(conn ipc.Conn) (*ipc.MessageBodyHelloIn, error) {
 
 func (app *App) poll() (ipc.Conn, *ipc.MessageBodyHelloIn) {
 	/* Do one pass of polling */
-	factories := ipc.PollProject64(app.ctx)
+	factories := ipc.Poll(app.ctx)
 	for _, factory := range factories {
 		conn, err := factory.Open()
 		if err != nil {
@@ -110,7 +112,7 @@ func (app *App) poll() (ipc.Conn, *ipc.MessageBodyHelloIn) {
 }
 
 func (app *App) loop() {
-	fmt.Println("Waiting for Project64 to connect...")
+	fmt.Println("Waiting for a game instance to connect...")
 	for {
 		if app.ctx.Err() != nil {
 			break
@@ -125,5 +127,32 @@ func (app *App) loop() {
 			case <-time.After(time.Second):
 			}
 		}
+	}
+}
+
+func Start() {
+	registerFileAssociation()
+
+	conf, err := config.ParseConfig(os.Args[1:])
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		os.Exit(1)
+		return
+	}
+
+	/* Create a new context with signal handling */
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	/* Run the application */
+	err = Run(ctx, conf)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
 	}
 }

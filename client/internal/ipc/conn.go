@@ -9,3 +9,7 @@ type Conn interface {
 type ConnFactory interface {
 	Open() (Conn, error)
 }
+
+type Poller interface {
+	Poll() []ConnFactory
+}

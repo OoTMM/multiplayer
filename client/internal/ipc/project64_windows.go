@@ -1,3 +1,5 @@
+//go:build windows
+
 package ipc
 
 import (
@@ -68,7 +70,7 @@ func newPJ64Conn(path string) (*PJ64Conn, error) {
 	return &PJ64Conn{handle: h, path: path, readEvent: readEvent, writeEvent: writeEvent}, nil
 }
 
-func PollProject64(ctx context.Context) []ConnFactory {
+func Poll(ctx context.Context) []ConnFactory {
 	pipes := listPipes()
 	factories := make([]ConnFactory, 0, len(pipes))
 	for _, pipe := range pipes {
