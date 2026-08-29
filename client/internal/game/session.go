@@ -438,10 +438,8 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		if p.Info.Mode != InfoModeSingle {
 			p.positions.OnGamePos(posMsg)
 		}
-		return nil
-	default:
-		return fmt.Errorf("unhandled message opcode: %d", msg.Op)
 	}
+	return nil
 }
 
 func (p *Session) Send(msg *ipc.Message) {
