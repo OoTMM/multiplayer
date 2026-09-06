@@ -54,7 +54,9 @@ func (app *App) displayInfo() {
 	color.HiWhite("OoTMM Client - %s\n\n", version.Version)
 	star := color.BlueString(" * ")
 	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "Session ID: ")), color.HiCyanString("%x", app.info.SessionID))
-	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "World ID: ")), color.HiCyanString("%x", app.info.WorldID))
+	if app.info.Mode == game.InfoModeMulti {
+		fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "World ID: ")), color.HiCyanString("%x", app.info.WorldID))
+	}
 	fmt.Printf("%s%s%s\n", star, color.HiWhiteString(fmt.Sprintf("%-12s", "Mode: ")), color.HiCyanString("%s", modeStr))
 	fmt.Printf("\n")
 }
