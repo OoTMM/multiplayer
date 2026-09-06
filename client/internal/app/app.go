@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
+	"github.com/OoTMM/multiplayer/client/internal/daemon"
 	"github.com/OoTMM/multiplayer/client/internal/events"
 	"github.com/OoTMM/multiplayer/client/internal/game"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
@@ -19,6 +20,7 @@ type App struct {
 	info   *game.Info
 	conf   *config.Config
 	ctx    context.Context
+	daemon *daemon.DaemonConn
 	events *events.EventSink
 }
 
@@ -27,6 +29,12 @@ func Run(ctx context.Context, conf *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to extract game info: %w", err)
 	}
+
+	daemonConn, err := daemon.Connect()
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon: %w", err)
+	}
+	defer daemonConn.Close()
 
 	events, err := events.NewEventSink(ctx)
 	if err != nil {
@@ -38,6 +46,7 @@ func Run(ctx context.Context, conf *config.Config) error {
 		info:   info,
 		conf:   conf,
 		ctx:    ctx,
+		daemon: daemonConn,
 		events: events,
 	}
 
