@@ -25,15 +25,23 @@ func Connect() (*DaemonConn, error) {
 		return nil, err
 	}
 
-	/* Wait for the daemon to start */
-	time.Sleep(2 * time.Second)
-
-	/* Try to connect again after launching the daemon */
-	conn, err = net.Dial("unix", daemonSocketPath)
-	if err != nil {
-		return nil, err
+	/* Loop until the daemon socket becomes available or a timeout occurs */
+	timeout := time.After(5 * time.Second)
+	tick := time.Tick(100 * time.Millisecond)
+	for {
+		select {
+		case <-timeout:
+			return nil, err
+		case <-tick:
+			if _, err := os.Stat(daemonSocketPath); err == nil {
+				conn, err = net.Dial("unix", daemonSocketPath)
+				if err != nil {
+					return nil, err
+				}
+				return &DaemonConn{conn: conn}, nil
+			}
+		}
 	}
-	return &DaemonConn{conn: conn}, nil
 }
 
 /* Re-start the process, passing a special flag */
