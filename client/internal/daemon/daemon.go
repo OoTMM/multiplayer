@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"context"
-	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -13,10 +13,6 @@ import (
 )
 
 var daemonSocketPath = fmt.Sprintf("%s/internal.sock", util.RunDir())
-
-type client struct {
-	id [16]byte
-}
 
 type daemon struct {
 	ctx          context.Context
@@ -100,17 +96,7 @@ func (d *daemon) run() {
 }
 
 func (d *daemon) handleConnection(conn *net.UnixConn) {
-	/* Generate a unique client ID */
-	clientId := make([]byte, 16)
-	_, err := rand.Read(clientId)
-	if err != nil {
-		return
-	}
-
-	client := &client{
-		id: [16]byte{},
-	}
-	copy(client.id[:], clientId)
+	client := newClient()
 
 	d.mu.Lock()
 	d.clients[client.id] = client
@@ -121,12 +107,18 @@ func (d *daemon) handleConnection(conn *net.UnixConn) {
 		delete(d.clients, client.id)
 		d.mu.Unlock()
 		conn.Close()
+		client.close()
 	}()
 
 	for d.ctx.Err() == nil {
-		_, err := recvMsg(conn)
+		msg, err := recvMsg(conn)
 		if err != nil {
 			return
 		}
+		data, err := json.Marshal(msg)
+		if err != nil {
+			return
+		}
+		client.broadcast(string(data))
 	}
 }
