@@ -124,7 +124,7 @@ func (d *daemon) handleConnection(conn *net.UnixConn) {
 	}()
 
 	for d.ctx.Err() == nil {
-		_, err := RecvMsg(conn)
+		_, err := recvMsg(conn)
 		if err != nil {
 			return
 		}

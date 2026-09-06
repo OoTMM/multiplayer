@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
-	"github.com/OoTMM/multiplayer/client/internal/events"
+	"github.com/OoTMM/multiplayer/client/internal/daemon"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 	"github.com/OoTMM/multiplayer/shared/wal"
@@ -20,7 +20,7 @@ import (
 
 type Session struct {
 	Conf       *config.Config
-	Events     *events.EventSink
+	Daemon     *daemon.DaemonConn
 	Info       *Info
 	Conn       ipc.Conn
 	PlayerID   [16]byte
@@ -101,7 +101,7 @@ func makeDataDir(prefix string, id []byte) (string, error) {
 	return dataDir, nil
 }
 
-func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, hello *ipc.MessageBodyHelloIn, events *events.EventSink) {
+func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, hello *ipc.MessageBodyHelloIn, aDaemon *daemon.DaemonConn) {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -151,7 +151,7 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 
 	session := &Session{
 		Conf:       conf,
-		Events:     events,
+		Daemon:     aDaemon,
 		Info:       info,
 		Conn:       conn,
 		PlayerID:   hello.PlayerID,
@@ -197,12 +197,13 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 	}
 
 	/* Log a game start event */
-	events.Emit("GAME_START",
-		"sessionId", hex.EncodeToString(session.Info.SessionID[:]),
-		"playerId", hex.EncodeToString(session.PlayerID[:]),
-		"playerName", strings.TrimRight(string(session.PlayerName[:]), "\x00"),
-		"worldId", fmt.Sprintf("%d", session.Info.WorldID),
-	)
+	aDaemon.Send(&daemon.Msg{
+		Type:       daemon.MsgTypeGameStart,
+		SessionID:  hex.EncodeToString(session.Info.SessionID[:]),
+		PlayerID:   hex.EncodeToString(session.PlayerID[:]),
+		PlayerName: strings.TrimRight(string(session.PlayerName[:]), "\x00"),
+		WorldID:    int(session.Info.WorldID),
+	})
 
 	/* Wait for cancellation */
 	<-session.ctx.Done()
@@ -211,7 +212,9 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 	wg.Wait()
 
 	/* Log a game end event */
-	events.Emit("GAME_END")
+	aDaemon.Send(&daemon.Msg{
+		Type: daemon.MsgTypeGameEnd,
+	})
 
 	fmt.Println("Session closed")
 }
@@ -318,9 +321,6 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 
 		/* Log */
 		fmt.Printf("Game: Item (To=%d, Game=%d, GI=%d, Flags=%04x, Key=%08x)\n", item.To, item.Game, item.GI, item.Flags, item.Key)
-
-		/* Send the event */
-		p.Events.Emit("GAME_ITEM", "gi", item.GI)
 
 		entry.Type = wal.WalItem
 		entry.Item.To = item.To
@@ -459,6 +459,12 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		if p.Info.Mode != InfoModeSingle {
 			p.positions.OnGamePos(posMsg)
 		}
+	case ipc.OpInfoItem:
+		infoItemMsg, err := ipc.ParseMessageBodyInfoItem(msg.Payload)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("received INFO_ITEM message: %+v\n", infoItemMsg)
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ const (
 	OpWalQuery Opcode = 0x03
 	OpWalAck   Opcode = 0x04
 	OpPosition Opcode = 0x05
+	OpInfoItem Opcode = 0x06
 )
 
 type Message struct {
@@ -83,6 +84,11 @@ type MessageBodyWalQueryIn struct {
 	Index uint32
 }
 
+type MessageBodyInfoItem struct {
+	Key uint32
+	GI  uint16
+}
+
 func ParseMessage(data []byte) (*Message, error) {
 	if len(data) < 5 {
 		return nil, fmt.Errorf("message too short")
@@ -151,6 +157,16 @@ func ParseWalEvent(data []byte) (*WalEvent, error) {
 	var event WalEvent
 	event.EventID = binary.BigEndian.Uint32(data[0:4])
 	return &event, nil
+}
+
+func ParseMessageBodyInfoItem(data []byte) (*MessageBodyInfoItem, error) {
+	if len(data) < 6 {
+		return nil, fmt.Errorf("message body too short for INFO_ITEM")
+	}
+	var body MessageBodyInfoItem
+	body.Key = binary.BigEndian.Uint32(data[0:4])
+	body.GI = binary.BigEndian.Uint16(data[4:6])
+	return &body, nil
 }
 
 func (msg *Message) Serialize() []byte {

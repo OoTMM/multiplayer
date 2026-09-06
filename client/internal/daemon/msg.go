@@ -2,15 +2,39 @@ package daemon
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"net"
 )
 
-func SendMsg(conn net.Conn, data []byte) error {
+type MsgType string
+
+const (
+	MsgTypeGameStart MsgType = "GAME_START"
+	MsgTypeGameEnd   MsgType = "GAME_END"
+	MsgTypeEventItem MsgType = "EVENT_ITEM"
+)
+
+/* Fat message structure */
+type Msg struct {
+	Type       MsgType `json:"type"`
+	SessionID  string  `json:"sessionId,omitempty"`
+	PlayerID   string  `json:"playerId,omitempty"`
+	PlayerName string  `json:"playerName,omitempty"`
+	WorldID    int     `json:"worldId,omitempty"`
+	Item       string  `json:"item,omitempty"`
+	Location   string  `json:"location,omitempty"`
+}
+
+func sendMsg(conn net.Conn, msg *Msg) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
 	var header [4]byte
 	size := uint32(len(data))
 	binary.LittleEndian.PutUint32(header[:], size)
-	_, err := conn.Write(header[:])
+	_, err = conn.Write(header[:])
 	if err != nil {
 		return err
 	}
@@ -18,7 +42,7 @@ func SendMsg(conn net.Conn, data []byte) error {
 	return err
 }
 
-func RecvMsg(conn net.Conn) ([]byte, error) {
+func recvMsg(conn net.Conn) (*Msg, error) {
 	var header [4]byte
 	_, err := io.ReadFull(conn, header[:])
 	if err != nil {
@@ -30,5 +54,10 @@ func RecvMsg(conn net.Conn) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return data, nil
+	var msg Msg
+	err = json.Unmarshal(data, &msg)
+	if err != nil {
+		return nil, err
+	}
+	return &msg, nil
 }

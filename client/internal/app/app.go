@@ -9,7 +9,6 @@ import (
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
 	"github.com/OoTMM/multiplayer/client/internal/daemon"
-	"github.com/OoTMM/multiplayer/client/internal/events"
 	"github.com/OoTMM/multiplayer/client/internal/game"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/version"
@@ -21,7 +20,6 @@ type App struct {
 	conf   *config.Config
 	ctx    context.Context
 	daemon *daemon.DaemonConn
-	events *events.EventSink
 }
 
 func Run(ctx context.Context, conf *config.Config) error {
@@ -36,18 +34,11 @@ func Run(ctx context.Context, conf *config.Config) error {
 	}
 	defer daemonConn.Close()
 
-	events, err := events.NewEventSink(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to create event sink: %w", err)
-	}
-	defer events.Close()
-
 	app := &App{
 		info:   info,
 		conf:   conf,
 		ctx:    ctx,
 		daemon: daemonConn,
-		events: events,
 	}
 
 	app.displayInfo()
@@ -139,7 +130,7 @@ func (app *App) loop() {
 		}
 		conn, hello := app.poll()
 		if conn != nil && hello != nil {
-			game.Run(app.ctx, app.conf, app.info, conn, hello, app.events)
+			game.Run(app.ctx, app.conf, app.info, conn, hello, app.daemon)
 		} else {
 			select {
 			case <-app.ctx.Done():

@@ -8,15 +8,11 @@ import (
 	"github.com/OoTMM/multiplayer/client/internal/util"
 )
 
-type DaemonConn struct {
-	conn net.Conn
-}
-
 func Connect() (*DaemonConn, error) {
 	/* Fast track: try to connect to the daemon first */
 	conn, err := net.Dial("unix", daemonSocketPath)
 	if err == nil {
-		return &DaemonConn{conn: conn}, nil
+		return createDaemonConn(conn), nil
 	}
 
 	/* The connection failed, try to launch the daemon */
@@ -38,7 +34,7 @@ func Connect() (*DaemonConn, error) {
 				if err != nil {
 					return nil, err
 				}
-				return &DaemonConn{conn: conn}, nil
+				return createDaemonConn(conn), nil
 			}
 		}
 	}
@@ -55,8 +51,4 @@ func launchDaemon() error {
 		return err
 	}
 	return nil
-}
-
-func (d *DaemonConn) Close() error {
-	return d.conn.Close()
 }
