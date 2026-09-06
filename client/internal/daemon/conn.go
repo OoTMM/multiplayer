@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"fmt"
 	"net"
 )
 
@@ -11,7 +10,6 @@ type DaemonConn struct {
 }
 
 func (conn *DaemonConn) Send(data *Msg) error {
-	fmt.Printf("DEBUG: Sending message: %+v\n", data)
 	conn.chSend <- data
 	return nil
 }

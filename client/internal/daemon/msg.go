@@ -12,7 +12,7 @@ type MsgType string
 const (
 	MsgTypeGameStart MsgType = "GAME_START"
 	MsgTypeGameEnd   MsgType = "GAME_END"
-	MsgTypeEventItem MsgType = "EVENT_ITEM"
+	MsgTypeInfoItem  MsgType = "INFO_ITEM"
 )
 
 /* Fat message structure */

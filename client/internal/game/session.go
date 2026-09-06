@@ -464,7 +464,13 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("received INFO_ITEM message: %+v\n", infoItemMsg)
+		item := p.Info.Items[infoItemMsg.GI]
+		location := p.Info.Locations[infoItemMsg.Key]
+		p.Daemon.Send(&daemon.Msg{
+			Type:     daemon.MsgTypeInfoItem,
+			Item:     item,
+			Location: location,
+		})
 	}
 	return nil
 }
