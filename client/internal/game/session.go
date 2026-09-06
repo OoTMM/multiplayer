@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
+	"github.com/OoTMM/multiplayer/client/internal/daemon"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/protocol"
 	"github.com/OoTMM/multiplayer/shared/wal"
@@ -17,6 +20,7 @@ import (
 
 type Session struct {
 	Conf       *config.Config
+	Daemon     *daemon.DaemonConn
 	Info       *Info
 	Conn       ipc.Conn
 	PlayerID   [16]byte
@@ -97,7 +101,7 @@ func makeDataDir(prefix string, id []byte) (string, error) {
 	return dataDir, nil
 }
 
-func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, hello *ipc.MessageBodyHelloIn) {
+func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, hello *ipc.MessageBodyHelloIn, aDaemon *daemon.DaemonConn) {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -147,6 +151,7 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 
 	session := &Session{
 		Conf:       conf,
+		Daemon:     aDaemon,
 		Info:       info,
 		Conn:       conn,
 		PlayerID:   hello.PlayerID,
@@ -191,11 +196,25 @@ func Run(ctx context.Context, conf *config.Config, info *Info, conn ipc.Conn, he
 		wg.Go(session.handleSendQueue)
 	}
 
+	/* Log a game start event */
+	aDaemon.Send(&daemon.Msg{
+		Type:       daemon.MsgTypeGameStart,
+		SessionID:  hex.EncodeToString(session.Info.SessionID[:]),
+		PlayerID:   hex.EncodeToString(session.PlayerID[:]),
+		PlayerName: strings.TrimRight(string(session.PlayerName[:]), "\x00"),
+		WorldID:    int(session.Info.WorldID),
+	})
+
 	/* Wait for cancellation */
 	<-session.ctx.Done()
 	session.positions.Close()
 	session.Conn.Close()
 	wg.Wait()
+
+	/* Log a game end event */
+	aDaemon.Send(&daemon.Msg{
+		Type: daemon.MsgTypeGameEnd,
+	})
 
 	fmt.Println("Session closed")
 }
@@ -299,6 +318,8 @@ func (p *Session) handleWalIn(w *ipc.MessageBodyWalIn) error {
 		if err != nil {
 			return err
 		}
+
+		/* Log */
 		fmt.Printf("Game: Item (To=%d, Game=%d, GI=%d, Flags=%04x, Key=%08x)\n", item.To, item.Game, item.GI, item.Flags, item.Key)
 
 		entry.Type = wal.WalItem
@@ -438,6 +459,18 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		if p.Info.Mode != InfoModeSingle {
 			p.positions.OnGamePos(posMsg)
 		}
+	case ipc.OpInfoItem:
+		infoItemMsg, err := ipc.ParseMessageBodyInfoItem(msg.Payload)
+		if err != nil {
+			return err
+		}
+		item := p.Info.Items[infoItemMsg.GI]
+		location := p.Info.Locations[infoItemMsg.Key]
+		p.Daemon.Send(&daemon.Msg{
+			Type:     daemon.MsgTypeInfoItem,
+			Item:     item,
+			Location: location,
+		})
 	}
 	return nil
 }

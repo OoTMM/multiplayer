@@ -23,6 +23,86 @@ type Info struct {
 	SessionSecret [8]byte
 	WorldID       uint8
 	Mode          InfoMode
+	Items         map[uint16]string
+	Locations     map[uint32]string
+}
+
+type versionField struct {
+	Version int `json:"version"`
+}
+
+func parseItems(reader *zip.ReadCloser, info *Info) {
+	type itemEntry struct {
+		ID  uint16 `json:"id"`
+		Sym string `json:"sym"`
+	}
+	type itemsManifest struct {
+		Items []itemEntry `json:"items"`
+	}
+
+	file, err := reader.Open("manifests/items.json")
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return
+	}
+	var version versionField
+	err = json.Unmarshal(data, &version)
+	if err != nil {
+		return
+	}
+	if version.Version != 1 {
+		return
+	}
+	var manifest itemsManifest
+	err = json.Unmarshal(data, &manifest)
+	if err != nil {
+		return
+	}
+
+	for _, item := range manifest.Items {
+		info.Items[item.ID] = item.Sym
+	}
+}
+
+func parseLocations(reader *zip.ReadCloser, info *Info) {
+	type entry struct {
+		Key      uint32 `json:"key"`
+		Location string `json:"location"`
+	}
+	type manifest struct {
+		Locations []entry `json:"locations"`
+	}
+
+	file, err := reader.Open("manifests/locations.json")
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return
+	}
+	var version versionField
+	err = json.Unmarshal(data, &version)
+	if err != nil {
+		return
+	}
+	if version.Version != 1 {
+		return
+	}
+	var m manifest
+	err = json.Unmarshal(data, &m)
+	if err != nil {
+		return
+	}
+
+	for _, loc := range m.Locations {
+		info.Locations[loc.Key] = loc.Location
+	}
 }
 
 func ExtractGameInfo(conf *config.Config) (*Info, error) {
@@ -77,6 +157,8 @@ func ExtractGameInfo(conf *config.Config) (*Info, error) {
 	var info Info
 	copy(info.SessionID[:], sessionID)
 	copy(info.SessionSecret[:], sessionSecret)
+	info.Items = make(map[uint16]string)
+	info.Locations = make(map[uint32]string)
 	info.WorldID = rawMeta.Meta.WorldID
 
 	switch rawMeta.Meta.Mode {
@@ -89,6 +171,9 @@ func ExtractGameInfo(conf *config.Config) (*Info, error) {
 	default:
 		return nil, fmt.Errorf("unknown mode: %s", rawMeta.Meta.Mode)
 	}
+
+	parseItems(reader, &info)
+	parseLocations(reader, &info)
 
 	return &info, nil
 }

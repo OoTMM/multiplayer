@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/config"
+	"github.com/OoTMM/multiplayer/client/internal/daemon"
 	"github.com/OoTMM/multiplayer/client/internal/game"
 	"github.com/OoTMM/multiplayer/client/internal/ipc"
 	"github.com/OoTMM/multiplayer/shared/version"
@@ -15,9 +16,10 @@ import (
 )
 
 type App struct {
-	info *game.Info
-	conf *config.Config
-	ctx  context.Context
+	info   *game.Info
+	conf   *config.Config
+	ctx    context.Context
+	daemon *daemon.DaemonConn
 }
 
 func Run(ctx context.Context, conf *config.Config) error {
@@ -26,10 +28,17 @@ func Run(ctx context.Context, conf *config.Config) error {
 		return fmt.Errorf("failed to extract game info: %w", err)
 	}
 
+	daemonConn, err := daemon.Connect()
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon: %w", err)
+	}
+	defer daemonConn.Close()
+
 	app := &App{
-		info: info,
-		conf: conf,
-		ctx:  ctx,
+		info:   info,
+		conf:   conf,
+		ctx:    ctx,
+		daemon: daemonConn,
 	}
 
 	app.displayInfo()
@@ -121,7 +130,7 @@ func (app *App) loop() {
 		}
 		conn, hello := app.poll()
 		if conn != nil && hello != nil {
-			game.Run(app.ctx, app.conf, app.info, conn, hello)
+			game.Run(app.ctx, app.conf, app.info, conn, hello, app.daemon)
 		} else {
 			select {
 			case <-app.ctx.Done():
