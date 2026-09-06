@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -26,14 +27,30 @@ type EventSink struct {
 	done      chan struct{}
 }
 
-func NewEventSink(ctx context.Context) (*EventSink, error) {
-	var baseDir string
+func reapSockets(dir string) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".sock") {
+			continue
+		}
 
-	baseDir = fmt.Sprintf("%s\\OoTMM\\run\\%d", os.Getenv("LOCALAPPDATA"), os.Getpid())
-	err := os.MkdirAll(baseDir, 0700)
+		lockFile := fmt.Sprintf("%s/%s.lock", dir, file.Name())
+
+	}
+}
+
+func NewEventSink(ctx context.Context) (*EventSink, error) {
+	dir := runDir()
+	err := os.MkdirAll(dir, 0700)
 	if err != nil {
 		return nil, err
 	}
+
+	sockPath := fmt.Sprintf("%s/%d.sock", dir, os.Getpid())
+	lockPath := fmt.Sprintf("%s.lock", sockPath)
 
 	sockPath := fmt.Sprintf("%s\\events.sock", baseDir)
 	addr, err := net.ResolveUnixAddr("unix", sockPath)
