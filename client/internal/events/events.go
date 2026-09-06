@@ -132,12 +132,6 @@ func (es *EventSink) Close() error {
 		return err
 	}
 	<-es.done
-
-	err = os.RemoveAll(es.baseDir)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 

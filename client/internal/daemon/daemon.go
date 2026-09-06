@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"net"
 	"os"
@@ -13,12 +14,17 @@ import (
 
 var daemonSocketPath = fmt.Sprintf("%s/internal.sock", util.RunDir())
 
+type client struct {
+	id [16]byte
+}
+
 type daemon struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	listener    *net.UnixListener
-	mu          sync.Mutex
-	clientCount int
+	ctx          context.Context
+	cancel       context.CancelFunc
+	listener     *net.UnixListener
+	httpListener *net.TCPListener
+	mu           sync.Mutex
+	clients      map[[16]byte]*client
 }
 
 /* Bind to the unix socket, remove it if stale */
@@ -34,17 +40,24 @@ func Run() {
 	if err != nil {
 		panic(err)
 	}
-
 	defer listener.Close()
+
+	rawHttpListener, err := net.Listen("tcp", "127.0.0.1:39278")
+	if err != nil {
+		panic(err)
+	}
+	httpListener := rawHttpListener.(*net.TCPListener)
+	defer httpListener.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	daemon := &daemon{
-		ctx:         ctx,
-		cancel:      cancel,
-		listener:    listener,
-		clientCount: 0,
+		ctx:          ctx,
+		cancel:       cancel,
+		listener:     listener,
+		httpListener: httpListener,
+		clients:      make(map[[16]byte]*client),
 	}
 	daemon.run()
 }
@@ -56,7 +69,7 @@ func (d *daemon) watchdog() {
 			return
 		case <-time.After(5 * time.Second):
 			d.mu.Lock()
-			if d.clientCount == 0 {
+			if len(d.clients) == 0 {
 				d.cancel()
 			}
 			d.mu.Unlock()
@@ -65,10 +78,14 @@ func (d *daemon) watchdog() {
 }
 
 func (d *daemon) run() {
+	/* Start the HTTP server */
+	go d.httpServer()
+
 	/* Close the listener on exit */
 	go func() {
 		<-d.ctx.Done()
 		d.listener.Close()
+		d.httpListener.Close()
 	}()
 
 	go d.watchdog()
@@ -83,16 +100,33 @@ func (d *daemon) run() {
 }
 
 func (d *daemon) handleConnection(conn *net.UnixConn) {
+	/* Generate a unique client ID */
+	clientId := make([]byte, 16)
+	_, err := rand.Read(clientId)
+	if err != nil {
+		return
+	}
+
+	client := &client{
+		id: [16]byte{},
+	}
+	copy(client.id[:], clientId)
+
 	d.mu.Lock()
-	d.clientCount++
+	d.clients[client.id] = client
 	d.mu.Unlock()
 
 	defer func() {
 		d.mu.Lock()
-		d.clientCount--
+		delete(d.clients, client.id)
 		d.mu.Unlock()
 		conn.Close()
 	}()
 
-	// Handle the connection here
+	for d.ctx.Err() == nil {
+		_, err := RecvMsg(conn)
+		if err != nil {
+			return
+		}
+	}
 }
