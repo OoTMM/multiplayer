@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'r*'
+    branches:
+      - master
 
 permissions:
   contents: write
@@ -20,17 +22,29 @@ jobs:
         with:
           go-version-file: go.work
 
-      - name: Extract version informations
+      - id: meta
+        name: Extract metadata
         run: |
-          VERSION="${{ github.ref_name }}"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [ -n "${GITHUB_REF_NAME}" ] && [[ "${GITHUB_REF_NAME}" == "master" ]]; then
+            short_sha="$(git rev-parse --short HEAD)"
+            echo "version=dev-$short_sha" >> $GITHUB_OUTPUT
+            echo "release_name=dev" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "release_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build binaries
         run: ./release.sh
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
 
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
           working_directory: dist
           files: '*'
+          tag_name: ${{ steps.meta.outputs.release_name }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
