@@ -24,7 +24,6 @@ func StartDetachedProcess(path string, args []string) error {
 		Files: []*os.File{devNull, devNull, devNull},
 		Sys: &syscall.SysProcAttr{
 			Setsid: true,
-			Noctty: true,
 		},
 	}
 	process, err := os.StartProcess(path, args, attr)
