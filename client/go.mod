@@ -6,6 +6,7 @@ require (
 	github.com/fatih/color v1.19.0
 	github.com/spf13/pflag v1.0.10
 	golang.org/x/sys v0.47.0
+	github.com/gofrs/flock v0.13.1
 )
 
 require (

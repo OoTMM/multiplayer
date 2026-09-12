@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/OoTMM/multiplayer/client/internal/util"
+	"github.com/gofrs/flock"
 )
 
 var daemonSocketPath = fmt.Sprintf("%s/internal.sock", util.RunDir())
+var daemonLockPath = fmt.Sprintf("%s/internal.lock", util.RunDir())
 
 type daemon struct {
 	ctx          context.Context
@@ -23,9 +25,28 @@ type daemon struct {
 	clients      map[[16]byte]*client
 }
 
-/* Bind to the unix socket, remove it if stale */
 func Run() {
 	os.MkdirAll(util.RunDir(), 0o700)
+
+	/* Try to acquire the daemon lock */
+	lock := flock.New(daemonLockPath)
+	ok, err := lock.TryLock()
+	if err != nil {
+		fmt.Printf("Failed to acquire daemon lock: %v\n", err)
+		return
+	}
+	if !ok {
+		fmt.Printf("Failed to acquire daemon lock: already locked\n")
+		return
+	}
+
+	defer func() {
+		lock.Close()
+		os.Remove(daemonLockPath)
+	}()
+
+	/* Remove a stale socket, if any */
+	os.Remove(daemonSocketPath)
 
 	addr, err := net.ResolveUnixAddr("unix", daemonSocketPath)
 	if err != nil {
