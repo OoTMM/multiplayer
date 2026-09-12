@@ -10,6 +10,8 @@ import (
 )
 
 func ensureDaemonStarted() error {
+	os.MkdirAll(util.RunDir(), 0o700)
+
 	lock := flock.New(daemonLockPath)
 	ok, err := lock.TryLock()
 	if err != nil {
