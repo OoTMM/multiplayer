@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -25,15 +29,10 @@ jobs:
       - id: meta
         name: Extract metadata
         run: |
-          if [ -n "${GITHUB_REF_NAME}" ] && [[ "${GITHUB_REF_NAME}" == "master" ]]; then
-            short_sha="$(git rev-parse --short HEAD)"
-            echo "version=dev-$short_sha" >> $GITHUB_OUTPUT
-            echo "release_name=dev" >> $GITHUB_OUTPUT
-            echo "prerelease=true" >> $GITHUB_OUTPUT
+          if [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            echo "version=dev-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           else
-            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            echo "release_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
           fi
 
       - name: Build binaries
@@ -41,10 +40,19 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
 
+      - name: Publish dev release
+        if: github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete dev --cleanup-tag --yes || true
+          gh release create dev dist/* --prerelease --target "$GITHUB_SHA" \
+            --title "Development build" \
+            --notes "Rolling build of master at $GITHUB_SHA. May be unstable."
+
       - name: Create release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3
         with:
           working_directory: dist
           files: '*'
-          tag_name: ${{ steps.meta.outputs.release_name }}
-          prerelease: ${{ steps.meta.outputs.prerelease }}
