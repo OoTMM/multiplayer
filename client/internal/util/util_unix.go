@@ -13,9 +13,15 @@ func RunDir() string {
 }
 
 func StartDetachedProcess(path string, args []string) error {
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer devNull.Close()
+
 	attr := &os.ProcAttr{
 		Dir:   "",
-		Files: []*os.File{nil, nil, nil},
+		Files: []*os.File{devNull, devNull, devNull},
 		Sys: &syscall.SysProcAttr{
 			Setsid: true,
 			Noctty: true,
