@@ -8,12 +8,13 @@ import (
 type Opcode uint8
 
 const (
-	OpHello    Opcode = 0x01
-	OpWal      Opcode = 0x02
-	OpWalQuery Opcode = 0x03
-	OpWalAck   Opcode = 0x04
-	OpPosition Opcode = 0x05
-	OpInfoItem Opcode = 0x06
+	OpHello        Opcode = 0x01
+	OpWal          Opcode = 0x02
+	OpWalQuery     Opcode = 0x03
+	OpWalAck       Opcode = 0x04
+	OpPosition     Opcode = 0x05
+	OpInfoItem     Opcode = 0x06
+	OpInfoEntrance Opcode = 0x07
 )
 
 type Message struct {
@@ -87,6 +88,12 @@ type MessageBodyWalQueryIn struct {
 type MessageBodyInfoItem struct {
 	Key uint32
 	GI  uint16
+}
+
+type MessageBodyInfoEntrance struct {
+	Original uint32
+	Entrance uint32
+	Age      uint8
 }
 
 func ParseMessage(data []byte) (*Message, error) {
@@ -166,6 +173,17 @@ func ParseMessageBodyInfoItem(data []byte) (*MessageBodyInfoItem, error) {
 	var body MessageBodyInfoItem
 	body.Key = binary.BigEndian.Uint32(data[0:4])
 	body.GI = binary.BigEndian.Uint16(data[4:6])
+	return &body, nil
+}
+
+func ParseMessageBodyInfoEntrance(data []byte) (*MessageBodyInfoEntrance, error) {
+	if len(data) < 9 {
+		return nil, fmt.Errorf("message body too short for INFO_ENTRANCE")
+	}
+	var body MessageBodyInfoEntrance
+	body.Original = binary.BigEndian.Uint32(data[0:4])
+	body.Entrance = binary.BigEndian.Uint32(data[4:8])
+	body.Age = data[8]
 	return &body, nil
 }
 

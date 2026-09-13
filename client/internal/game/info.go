@@ -25,6 +25,7 @@ type Info struct {
 	Mode          InfoMode
 	Items         map[uint16]string
 	Locations     map[uint32]string
+	Entrances     map[uint32]string
 }
 
 type versionField struct {
@@ -105,6 +106,43 @@ func parseLocations(reader *zip.ReadCloser, info *Info) {
 	}
 }
 
+func parseEntrances(reader *zip.ReadCloser, info *Info) {
+	type entry struct {
+		Key uint32 `json:"key"`
+		Sym string `json:"sym"`
+	}
+	type manifest struct {
+		Entrances []entry `json:"entrances"`
+	}
+
+	file, err := reader.Open("manifests/entrances.json")
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return
+	}
+	var version versionField
+	err = json.Unmarshal(data, &version)
+	if err != nil {
+		return
+	}
+	if version.Version != 1 {
+		return
+	}
+	var m manifest
+	err = json.Unmarshal(data, &m)
+	if err != nil {
+		return
+	}
+
+	for _, loc := range m.Entrances {
+		info.Entrances[loc.Key] = loc.Sym
+	}
+}
+
 func ExtractGameInfo(conf *config.Config) (*Info, error) {
 	reader, err := zip.OpenReader(conf.GamePatchPath)
 	if err != nil {
@@ -159,6 +197,7 @@ func ExtractGameInfo(conf *config.Config) (*Info, error) {
 	copy(info.SessionSecret[:], sessionSecret)
 	info.Items = make(map[uint16]string)
 	info.Locations = make(map[uint32]string)
+	info.Entrances = make(map[uint32]string)
 	info.WorldID = rawMeta.Meta.WorldID
 
 	switch rawMeta.Meta.Mode {
@@ -174,6 +213,7 @@ func ExtractGameInfo(conf *config.Config) (*Info, error) {
 
 	parseItems(reader, &info)
 	parseLocations(reader, &info)
+	parseEntrances(reader, &info)
 
 	return &info, nil
 }

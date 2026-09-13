@@ -418,6 +418,28 @@ func (s *Session) sendGameWal(index uint32) error {
 	return nil
 }
 
+func (p *Session) entranceName(id uint32) string {
+	if id == 0xffffffff {
+		return ""
+	}
+	e := p.Info.Entrances[id]
+	if e == "" {
+		return "UNKNOWN"
+	}
+	return e
+}
+
+func (p *Session) ageName(age uint8) string {
+	switch age {
+	case 0:
+		return "ADULT"
+	case 1:
+		return "CHILD"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 func (p *Session) handleMsg(msg *ipc.Message) error {
 	var expectedSeq uint32
 	if msg.Op == ipc.OpHello {
@@ -470,6 +492,18 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 			Type:     daemon.MsgTypeInfoItem,
 			Item:     item,
 			Location: location,
+		})
+	case ipc.OpInfoEntrance:
+		infoEntranceMsg, err := ipc.ParseMessageBodyInfoEntrance(msg.Payload)
+		if err != nil {
+			return err
+		}
+
+		p.Daemon.Send(&daemon.Msg{
+			Type:     daemon.MsgTypeInfoEntrance,
+			Entrance: p.entranceName(infoEntranceMsg.Entrance),
+			Original: p.entranceName(infoEntranceMsg.Original),
+			Age:      p.ageName(infoEntranceMsg.Age),
 		})
 	}
 	return nil

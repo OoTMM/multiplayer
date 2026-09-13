@@ -140,6 +140,8 @@ func (d *daemon) handleConnection(conn *net.UnixConn) {
 		if err != nil {
 			return
 		}
-		client.broadcast(string(data))
+		dataStr := string(data)
+		fmt.Println(dataStr)
+		client.broadcast(dataStr)
 	}
 }

@@ -10,9 +10,10 @@ import (
 type MsgType string
 
 const (
-	MsgTypeGameStart MsgType = "GAME_START"
-	MsgTypeGameEnd   MsgType = "GAME_END"
-	MsgTypeInfoItem  MsgType = "INFO_ITEM"
+	MsgTypeGameStart    MsgType = "GAME_START"
+	MsgTypeGameEnd      MsgType = "GAME_END"
+	MsgTypeInfoItem     MsgType = "INFO_ITEM"
+	MsgTypeInfoEntrance MsgType = "INFO_ENTRANCE"
 )
 
 /* Fat message structure */
@@ -24,6 +25,9 @@ type Msg struct {
 	WorldID    int     `json:"worldId,omitempty"`
 	Item       string  `json:"item,omitempty"`
 	Location   string  `json:"location,omitempty"`
+	Original   string  `json:"original,omitempty"`
+	Entrance   string  `json:"entrance,omitempty"`
+	Age        string  `json:"age,omitempty"`
 }
 
 func sendMsg(conn net.Conn, msg *Msg) error {
