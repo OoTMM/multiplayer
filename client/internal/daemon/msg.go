@@ -28,6 +28,7 @@ type Msg struct {
 	Original   string  `json:"original,omitempty"`
 	Entrance   string  `json:"entrance,omitempty"`
 	Age        string  `json:"age,omitempty"`
+	Self       *bool   `json:"self,omitempty"`
 }
 
 func sendMsg(conn net.Conn, msg *Msg) error {

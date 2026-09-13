@@ -86,8 +86,9 @@ type MessageBodyWalQueryIn struct {
 }
 
 type MessageBodyInfoItem struct {
-	Key uint32
-	GI  uint16
+	Key   uint32
+	GI    uint16
+	Flags uint8
 }
 
 type MessageBodyInfoEntrance struct {
@@ -167,12 +168,18 @@ func ParseWalEvent(data []byte) (*WalEvent, error) {
 }
 
 func ParseMessageBodyInfoItem(data []byte) (*MessageBodyInfoItem, error) {
-	if len(data) < 6 {
+	length := len(data)
+	if length < 6 {
 		return nil, fmt.Errorf("message body too short for INFO_ITEM")
 	}
 	var body MessageBodyInfoItem
 	body.Key = binary.BigEndian.Uint32(data[0:4])
 	body.GI = binary.BigEndian.Uint16(data[4:6])
+	if length >= 6 {
+		body.Flags = data[6]
+	} else {
+		body.Flags = 0x01
+	}
 	return &body, nil
 }
 

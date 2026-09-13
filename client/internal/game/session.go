@@ -488,10 +488,12 @@ func (p *Session) handleMsg(msg *ipc.Message) error {
 		}
 		item := p.Info.Items[infoItemMsg.GI]
 		location := p.Info.Locations[infoItemMsg.Key]
+		isSelf := (infoItemMsg.Flags&0x01 != 0)
 		p.Daemon.Send(&daemon.Msg{
 			Type:     daemon.MsgTypeInfoItem,
 			Item:     item,
 			Location: location,
+			Self:     &isSelf,
 		})
 	case ipc.OpInfoEntrance:
 		infoEntranceMsg, err := ipc.ParseMessageBodyInfoEntrance(msg.Payload)
