@@ -96,12 +96,9 @@ func (s *Session) BroadcastExcept(pkt *protocol.Packet, excluded *Player) {
 		select {
 		case player.out <- pkt:
 		case <-player.ctx.Done():
+		default:
 		}
 	}
-}
-
-func (s *Session) Broadcast(pkt *protocol.Packet) {
-	s.BroadcastExcept(pkt, nil)
 }
 
 func (p *Player) handlePositionUpdate(pos *protocol.ClientPosition) {

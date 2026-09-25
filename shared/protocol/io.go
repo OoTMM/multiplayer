@@ -2,22 +2,27 @@ package protocol
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"time"
 )
 
 func SendRaw(conn net.Conn, pkt *Packet) error {
-	size := uint16(len(pkt.Data))
-	header := make([]byte, 3)
-	binary.LittleEndian.PutUint16(header[0:2], size)
-	header[2] = byte(pkt.Op)
-
-	_, err := conn.Write(header)
-	if err != nil {
-		return err
+	/* Size check */
+	size := len(pkt.Data)
+	if size > 65535 {
+		return fmt.Errorf("packet size exceeds maximum allowed size of 65535 bytes")
 	}
-	_, err = conn.Write(pkt.Data)
+
+	/* Create packet */
+	data := make([]byte, 3+size)
+	binary.LittleEndian.PutUint16(data[0:2], uint16(size))
+	data[2] = byte(pkt.Op)
+	copy(data[3:], pkt.Data)
+
+	/* Send */
+	_, err := conn.Write(data)
 	return err
 }
 
