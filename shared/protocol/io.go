@@ -21,6 +21,16 @@ func SendRaw(conn net.Conn, pkt *Packet) error {
 	return err
 }
 
+func SendRawTimeout(conn net.Conn, pkt *Packet, timeout time.Duration) error {
+	conn.SetWriteDeadline(time.Now().Add(timeout))
+	defer conn.SetWriteDeadline(time.Time{})
+	return SendRaw(conn, pkt)
+}
+
+func SendRawTimeoutDefault(conn net.Conn, pkt *Packet) error {
+	return SendRawTimeout(conn, pkt, 10*time.Second)
+}
+
 func RecvRaw(conn net.Conn) (*Packet, error) {
 	header := make([]byte, 3)
 	_, err := io.ReadFull(conn, header)

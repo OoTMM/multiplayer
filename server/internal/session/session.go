@@ -250,7 +250,7 @@ func (p *Player) handleMsgOut() {
 			return
 		}
 
-		if err := protocol.SendRaw(p.Conn, pkt); err != nil {
+		if err := protocol.SendRawTimeoutDefault(p.Conn, pkt); err != nil {
 			if p.ctx.Err() == nil {
 				slog.Error("failed to send packet", "error", err)
 			}
@@ -311,8 +311,8 @@ func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, wal
 		Conn:     conn,
 		ctx:      ctx,
 		cancel:   cancel,
-		in:       make(chan *protocol.Packet, 16),
-		out:      make(chan *protocol.Packet, 16),
+		in:       make(chan *protocol.Packet, 64),
+		out:      make(chan *protocol.Packet, 64),
 	}
 
 	s.playersMutex.Lock()
@@ -333,7 +333,7 @@ func (s *Session) Join(PlayerID [16]byte, PlayerName [8]byte, worldID uint8, wal
 			Version: 0x00010000,
 		}).Serialize(),
 	}
-	err := protocol.SendRaw(conn, pkt)
+	err := protocol.SendRawTimeoutDefault(conn, pkt)
 
 	if err != nil {
 		slog.Error("failed to send hello packet", "error", err)
